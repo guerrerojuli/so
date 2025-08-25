@@ -14,44 +14,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <semaphore.h>
+#include "game_state.h"
+#include "game_sync.h"
 
-#define MAX_PLAYERS 9
-#define SHM_STATE "/game_state"
-#define SHM_SYNC "/game_sync"
-
-// -------------------- Tipos compartidos (deben matchear al master) --------------------
-
-typedef struct
-{
-  char name[16]; // visible (no usamos acá)
-  unsigned int score;
-  unsigned int invalids;
-  unsigned int valids;
-  unsigned short x, y; // posición actual
-  pid_t pid;           // usado para identificar "me"
-  bool blocked;        // lo setea el master al ver EOF
-} player_state_t;
-
-typedef struct
-{
-  unsigned short width;
-  unsigned short height;
-  unsigned int player_count;
-  player_state_t players[MAX_PLAYERS];
-  bool finished;
-  int board[]; // flexible array: tamaño = width*height
-} game_state_t;
-
-typedef struct
-{
-  sem_t A;              // master -> view (no lo usamos aquí)
-  sem_t B;              // view -> master (no lo usamos aquí)
-  sem_t C;              // turnstile (RW-lock)
-  sem_t D;              // resource (RW-lock)
-  sem_t E;              // mutex readers count (RW-lock)
-  unsigned int F;       // readers count (RW-lock)
-  sem_t G[MAX_PLAYERS]; // permiso por jugador: 1 movimiento a la vez
-} game_sync_t;
+// -------------------- Tipos compartidos: usar headers --------------------
 
 // -------------------- util mínima --------------------
 
@@ -64,13 +30,13 @@ static inline void die(const char *msg)
   exit(EXIT_FAILURE);
 }
 
-static inline int idx(const game_state_t *st, int x, int y)
+static inline int board_index(const GameState *state, int x, int y)
 {
-  return y * st->width + x;
+  return y * state->width + x;
 }
-static inline bool in_bounds(const game_state_t *st, int x, int y)
+static inline bool in_bounds(const GameState *state, int x, int y)
 {
-  return x >= 0 && y >= 0 && x < st->width && y < st->height;
+  return x >= 0 && y >= 0 && x < state->width && y < state->height;
 }
 static inline bool is_free_cell(int v) { return v >= 1 && v <= 9; }
 
@@ -82,37 +48,20 @@ static const int DY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
 // Lectores-escritor sin inanición del escritor.
 // Como player sólo lee, usamos enter/exit de lector.
 
-static inline void rw_reader_enter(game_sync_t *s)
-{
-  sem_wait(&s->C); // pasar por el torniquete
-  sem_post(&s->C);
-  sem_wait(&s->E); // proteger F
-  s->F++;
-  if (s->F == 1)
-    sem_wait(&s->D); // primer lector bloquea a escritores
-  sem_post(&s->E);
-}
-static inline void rw_reader_exit(game_sync_t *s)
-{
-  sem_wait(&s->E);
-  s->F--;
-  if (s->F == 0)
-    sem_post(&s->D); // último lector libera recurso
-  sem_post(&s->E);
-}
+/* RW-lock lector: usar implementación de game_sync.c */
 
 // -------------------- IA mínima (greedy local) --------------------
 
-static int choose_dir(const game_state_t *ST, unsigned me)
+static int choose_direction(const GameState *state, unsigned me)
 {
   int bestd = -1, bestv = -1;
-  int x = ST->players[me].x, y = ST->players[me].y;
+  int x = state->players[me].x, y = state->players[me].y;
   for (int d = 0; d < 8; d++)
   {
     int nx = x + DX[d], ny = y + DY[d];
-    if (!in_bounds(ST, nx, ny))
+    if (!in_bounds(state, nx, ny))
       continue;
-    int v = ST->board[idx(ST, nx, ny)];
+    int v = state->board[board_index(state, nx, ny)];
     if (is_free_cell(v) && v > bestv)
     {
       bestv = v;
@@ -127,6 +76,7 @@ static int choose_dir(const game_state_t *ST, unsigned me)
 int main(int argc, char **argv)
 {
   // Opcional: el enunciado dice que recibe width/height; no los usamos en la lógica.
+  (void)argv;
   if (argc < 3)
     die("player: uso: player <width> <height>\n");
 
@@ -137,7 +87,7 @@ int main(int argc, char **argv)
   int fd_state = -1;
   for (int i = 0; i < 2000; i++) // hasta ~2s
   {
-    fd_state = shm_open(SHM_STATE, O_RDONLY, 0600);
+    fd_state = shm_open(GAME_STATE_SHM_NAME, O_RDONLY, 0600);
     if (fd_state >= 0)
       break;
     if (errno != ENOENT)
@@ -146,11 +96,11 @@ int main(int argc, char **argv)
   }
   if (fd_state < 0)
     die("player shm_open state");
-  struct stat st;
-  if (fstat(fd_state, &st) < 0)
+  struct stat state_shm_stat;
+  if (fstat(fd_state, &state_shm_stat) < 0)
     die("player fstat state");
-  game_state_t *ST = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, fd_state, 0);
-  if (ST == MAP_FAILED)
+  GameState *state = mmap(NULL, state_shm_stat.st_size, PROT_READ, MAP_SHARED, fd_state, 0);
+  if (state == MAP_FAILED)
     die("player mmap state");
   close(fd_state);
 
@@ -158,7 +108,7 @@ int main(int argc, char **argv)
   int fd_sync = -1;
   for (int i = 0; i < 2000; i++)
   {
-    fd_sync = shm_open(SHM_SYNC, O_RDWR, 0600);
+    fd_sync = shm_open(GAME_SYNC_SHM_NAME, O_RDWR, 0600);
     if (fd_sync >= 0)
       break;
     if (errno != ENOENT)
@@ -167,8 +117,8 @@ int main(int argc, char **argv)
   }
   if (fd_sync < 0)
     die("player shm_open sync");
-  game_sync_t *SY = mmap(NULL, sizeof(game_sync_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sync, 0);
-  if (SY == MAP_FAILED)
+  GameSync *sync_area = mmap(NULL, sizeof(GameSync), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sync, 0);
+  if (sync_area == MAP_FAILED)
     die("player mmap sync");
   close(fd_sync);
 
@@ -178,19 +128,19 @@ int main(int argc, char **argv)
   for (;;)
   {
     bool found = false;
-    rw_reader_enter(SY);
-    unsigned pc = ST->player_count;
-    for (me = 0; me < pc; me++)
+    game_sync_reader_enter(sync_area);
+    unsigned player_count_snapshot = state->player_count;
+    for (me = 0; me < player_count_snapshot; me++)
     {
-      if (ST->players[me].pid == mypid)
+      if (state->players[me].pid == mypid)
       {
         found = true;
         break;
       }
     }
-    bool fin = ST->finished;
-    rw_reader_exit(SY);
-    if (fin)
+    bool finished_snapshot = state->finished;
+    game_sync_reader_exit(sync_area);
+    if (finished_snapshot)
       goto done; // si ya terminó, salir
     if (found)
       break;
@@ -201,29 +151,29 @@ int main(int argc, char **argv)
   while (1)
   {
     // Esperar permiso para ENVIAR UN movimiento
-    sem_wait(&SY->G[me]);
+    sem_wait(&sync_area->player_can_move[me]);
 
     // ¿Ya terminó el juego?
-    rw_reader_enter(SY);
-    bool fin = ST->finished;
-    rw_reader_exit(SY);
-    if (fin)
+    game_sync_reader_enter(sync_area);
+    bool finished_snapshot = state->finished;
+    game_sync_reader_exit(sync_area);
+    if (finished_snapshot)
       break;
 
     // Elegir dirección (snapshot de lectura mínima)
-    rw_reader_enter(SY);
-    int d = choose_dir(ST, me);
-    rw_reader_exit(SY);
+    game_sync_reader_enter(sync_area);
+    int chosen_dir = choose_direction(state, me);
+    game_sync_reader_exit(sync_area);
 
     // Sin movimientos válidos -> cerrar stdout (EOF) y terminar
-    if (d < 0)
+    if (chosen_dir < 0)
     {
       close(1);
       break;
     }
 
     // Enviar 1 byte con la dirección (0..7) por stdout (fd=1)
-    unsigned char dir = (unsigned char)d;
+    unsigned char dir = (unsigned char)chosen_dir;
     ssize_t w = write(1, &dir, 1);
     if (w != 1)
     {
@@ -234,7 +184,7 @@ int main(int argc, char **argv)
   }
 
 done:
-  munmap(SY, sizeof *SY);
-  munmap(ST, st.st_size);
+  munmap(sync_area, sizeof *sync_area);
+  munmap(state, state_shm_stat.st_size);
   return 0;
 }

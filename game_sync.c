@@ -1,11 +1,23 @@
- #include <semaphore.h>
- 
-typedef struct {
-     sem_t view_update_ready; // El máster le indica a la vista que hay cambios por imprimir
-     sem_t view_print_done; // La vista le indica al máster que terminó de imprimir
-     sem_t master_starvation_guard; // Mutex para evitar inanición del máster al acceder al estado
-     sem_t state_mutex; // Mutex para el estado del juego
-     sem_t readers_count_mutex; // Mutex para la siguiente variable
-     unsigned int readers_count; // Cantidad de jugadores leyendo el estado
-     sem_t player_can_move[9]; // Le indican a cada jugador que puede enviar 1 movimiento
- } GameSync;
+#include "game_sync.h"
+
+void game_sync_reader_enter(GameSync *s)
+{
+    /* Pass through turnstile to avoid starving writers (master) */
+    sem_wait(&s->master_starvation_guard);
+    sem_post(&s->master_starvation_guard);
+    /* Reader side of RW-lock */
+    sem_wait(&s->readers_count_mutex);
+    s->readers_count++;
+    if (s->readers_count == 1)
+        sem_wait(&s->state_mutex);
+    sem_post(&s->readers_count_mutex);
+}
+
+void game_sync_reader_exit(GameSync *s)
+{
+    sem_wait(&s->readers_count_mutex);
+    s->readers_count--;
+    if (s->readers_count == 0)
+        sem_post(&s->state_mutex);
+    sem_post(&s->readers_count_mutex);
+}

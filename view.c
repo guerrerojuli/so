@@ -13,21 +13,9 @@
 #include <ncurses.h>
 
 #include "game_state.h"
+#include "game_sync.h"
 
-/* Debe coincidir con player/master mínimos */
-#define SHM_STATE "/game_state"
-#define SHM_SYNC "/game_sync"
-
-typedef struct
-{
-    sem_t A;              /* master -> view */
-    sem_t B;              /* view -> master */
-    sem_t C;              /* turnstile (RW-lock) */
-    sem_t D;              /* resource (RW-lock) */
-    sem_t E;              /* readers mutex (RW-lock) */
-    unsigned int F;       /* readers count (RW-lock) */
-    sem_t G[MAX_PLAYERS]; /* per-player move slot */
-} game_sync_t;
+/* Debe coincidir con master */
 
 static volatile sig_atomic_t stop_requested = 0;
 
@@ -71,25 +59,7 @@ static void print_players(const GameState *state)
     }
 }
 
-static inline void rw_reader_enter(game_sync_t *s)
-{
-    sem_wait(&s->C);
-    sem_post(&s->C);
-    sem_wait(&s->E);
-    s->F++;
-    if (s->F == 1)
-        sem_wait(&s->D);
-    sem_post(&s->E);
-}
-
-static inline void rw_reader_exit(game_sync_t *s)
-{
-    sem_wait(&s->E);
-    s->F--;
-    if (s->F == 0)
-        sem_post(&s->D);
-    sem_post(&s->E);
-}
+/* Usa implementación común en game_sync.c */
 
 int main(int argc, char **argv)
 {
@@ -116,7 +86,7 @@ int main(int argc, char **argv)
     sa.sa_handler = handle_sigint;
     sigaction(SIGINT, &sa, NULL);
 
-    int fd_state = shm_open(SHM_STATE, O_RDONLY, 0600);
+    int fd_state = shm_open(GAME_STATE_SHM_NAME, O_RDONLY, 0600);
     if (fd_state == -1)
     {
         perror("shm_open(GAME_STATE)");
@@ -131,7 +101,7 @@ int main(int argc, char **argv)
     }
     GameState *state = (GameState *)addr_state;
 
-    int fd_sync = shm_open(SHM_SYNC, O_RDWR, 0600);
+    int fd_sync = shm_open(GAME_SYNC_SHM_NAME, O_RDWR, 0600);
     if (fd_sync == -1)
     {
         perror("shm_open(GAME_SYNC)");
@@ -139,7 +109,7 @@ int main(int argc, char **argv)
         close(fd_state);
         return 1;
     }
-    void *addr_sync = mmap(NULL, sizeof(game_sync_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sync, 0);
+    void *addr_sync = mmap(NULL, sizeof(GameSync), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sync, 0);
     if (addr_sync == MAP_FAILED)
     {
         perror("mmap(GAME_SYNC)");
@@ -148,7 +118,7 @@ int main(int argc, char **argv)
         close(fd_sync);
         return 1;
     }
-    game_sync_t *sync = (game_sync_t *)addr_sync;
+    GameSync *sync = (GameSync *)addr_sync;
 
     if (!getenv("TERM"))
         setenv("TERM", "xterm-256color", 1);
@@ -159,14 +129,14 @@ int main(int argc, char **argv)
 
     while (!stop_requested)
     {
-        if (sem_wait(&sync->A) == -1)
+        if (sem_wait(&sync->view_update_ready) == -1)
         {
             if (errno == EINTR)
                 continue;
-            perror("sem_wait(A)");
+            perror("sem_wait(view_update_ready)");
             break;
         }
-        rw_reader_enter(sync);
+        game_sync_reader_enter(sync);
 
         /* Read & render state */
         clear();
@@ -177,17 +147,17 @@ int main(int argc, char **argv)
                  "finished=%s", state->finished ? "true" : "false");
         refresh();
 
-        rw_reader_exit(sync);
+        game_sync_reader_exit(sync);
 
-        if (sem_post(&sync->B) == -1)
+        if (sem_post(&sync->view_print_done) == -1)
         {
-            perror("sem_post(B)");
+            perror("sem_post(view_print_done)");
             break;
         }
     }
 
     endwin();
-    munmap(addr_sync, sizeof(game_sync_t));
+    munmap(addr_sync, sizeof(GameSync));
     close(fd_sync);
     munmap(addr_state, map_size);
     close(fd_state);

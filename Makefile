@@ -18,15 +18,16 @@ else ifeq ($(UNAME_S),Darwin)
 endif
 
 BINS := view player
+OBJS_COMMON := game_sync.o
 
 .PHONY: all clean format
 
 all: $(BINS)
 
-view: view.o
+view: view.o $(OBJS_COMMON)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON) $(LIBS_VIEW)
 
-player: player.o
+player: player.o $(OBJS_COMMON)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON) $(LIBS_PLAYER)
 
 %.o: %.c
