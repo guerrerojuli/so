@@ -122,7 +122,6 @@ void close_shm(ShmADT shm){
                 exit(EXIT_FAILURE);
         }
 
-        // removes any mappings for those entire pages containing any part of the address space of the process starting at addr and continuing for len bytes
         if(-1 == munmap(shm->shmaddr, shm->size)){
                 perror("close_shm");
                 exit(EXIT_FAILURE);
