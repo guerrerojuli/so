@@ -18,7 +18,7 @@ else ifeq ($(UNAME_S),Darwin)
 endif
 
 BINS := view player
-OBJS_COMMON := game_sync.o
+OBJS_COMMON := game_sync.o utils/shmADT.o
 
 .PHONY: all clean format
 
@@ -33,8 +33,11 @@ player: player.o $(OBJS_COMMON)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+utils/shmADT.o: utils/shmADT.c headers/shmADT.h
+	$(CC) $(CFLAGS) -c utils/shmADT.c -o utils/shmADT.o
+
 clean:
-	rm -f $(BINS) *.o
+	rm -f $(BINS) *.o utils/*.o
 
 format:
 	@command -v clang-format >/dev/null 2>&1 && clang-format -i *.c *.h || echo "clang-format no encontrado; omitiendo formato"

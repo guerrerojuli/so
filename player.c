@@ -17,12 +17,40 @@ static inline int board_index(const GameState *state, int x, int y)
 }
 static inline bool in_bounds(const GameState *state, int x, int y)
 {
-  return x >= 0 && y >= 0 && x < state->width && y < state->height;
+  return x >= 0 && y >= 0 && x < (int)state->width && y < (int)state->height;
 }
 static inline bool is_free_cell(int v) { return v >= 1 && v <= 9; }
 
 static const int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
+static bool find_player_index_by_pid(const GameState *state, GameSync *sync,
+                                     pid_t pid, unsigned *out_index,
+                                     bool *out_finished_now)
+{
+  game_sync_reader_enter(sync);
+  unsigned player_count_snapshot = state->player_count;
+  if (player_count_snapshot > MAX_PLAYERS)
+    player_count_snapshot = MAX_PLAYERS;
+  for (unsigned i = 0; i < player_count_snapshot; i++)
+  {
+    if (state->players[i].pid == pid)
+    {
+      bool finished_snapshot = state->finished;
+      game_sync_reader_exit(sync);
+      if (out_index)
+        *out_index = i;
+      if (out_finished_now)
+        *out_finished_now = finished_snapshot;
+      return true;
+    }
+  }
+  bool finished_snapshot = state->finished;
+  game_sync_reader_exit(sync);
+  if (out_finished_now)
+    *out_finished_now = finished_snapshot;
+  return false;
+}
 
 static int choose_direction(const GameState *state, unsigned me)
 {
@@ -73,65 +101,50 @@ int main(int argc, char **argv)
 
   pid_t mypid = getpid();
   unsigned me = 0;
-  for (;;)
+  bool finished_now = false;
+  bool found = find_player_index_by_pid(state, sync_area, mypid, &me, &finished_now);
+  if (!found)
   {
-    bool found = false;
-    game_sync_reader_enter(sync_area);
-    unsigned player_count_snapshot = state->player_count;
-    for (me = 0; me < player_count_snapshot; me++)
+    errno = ENOENT;
+    perror("player: pid not registered");
+  }
+  else if (!finished_now)
+  {
+    while (1)
     {
-      if (state->players[me].pid == mypid)
+      if (sem_wait(&sync_area->player_can_move[me]) == -1)
       {
-        found = true;
+        if (errno == EINTR)
+          continue;
+        perror("player: sem_wait(player_can_move)");
+        break;
+      }
+
+      int chosen_dir = -1;
+      game_sync_reader_enter(sync_area);
+      bool finished_now = state->finished;
+      if (!finished_now)
+        chosen_dir = choose_direction(state, me);
+      game_sync_reader_exit(sync_area);
+      if (finished_now)
+        break;
+
+      if (chosen_dir < 0)
+      {
+        close(1);
+        break;
+      }
+
+      unsigned char dir = (unsigned char)chosen_dir;
+      ssize_t w = write(1, &dir, 1);
+      if (w != 1)
+      {
+        if (errno != 0)
+          perror("player: write(stdout)");
         break;
       }
     }
-    bool finished_snapshot = state->finished;
-    game_sync_reader_exit(sync_area);
-    if (finished_snapshot)
-      goto done;
-    if (found)
-      break;
-    usleep(1000);
   }
-
-  while (1)
-  {
-    if (sem_wait(&sync_area->player_can_move[me]) == -1)
-    {
-      if (errno == EINTR)
-        continue;
-      perror("player: sem_wait(player_can_move)");
-      break;
-    }
-
-    game_sync_reader_enter(sync_area);
-    bool finished_snapshot = state->finished;
-    game_sync_reader_exit(sync_area);
-    if (finished_snapshot)
-      break;
-
-    game_sync_reader_enter(sync_area);
-    int chosen_dir = choose_direction(state, me);
-    game_sync_reader_exit(sync_area);
-
-    if (chosen_dir < 0)
-    {
-      close(1);
-      break;
-    }
-
-    unsigned char dir = (unsigned char)chosen_dir;
-    ssize_t w = write(1, &dir, 1);
-    if (w != 1)
-    {
-      if (errno != 0)
-        perror("player: write(stdout)");
-      break;
-    }
-  }
-
-done:
   close_shm(sync_shm);
   close_shm(state_shm);
   return 0;
