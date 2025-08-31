@@ -22,6 +22,7 @@ ShmADT create_shm(const char * restrict name, size_t size, int open_flag, int mo
                 exit(EXIT_FAILURE);
         }
     
+        // se le asigna el espacio
         if(open_flag != O_RDONLY){
             if(-1 == ftruncate(fd, size)){
                     perror("create_shm");
@@ -50,32 +51,6 @@ ShmADT create_shm(const char * restrict name, size_t size, int open_flag, int mo
         new_shm->size = size;
     
         return new_shm;
-}
-
-void destroy_shm(ShmADT shm){
-        if(shm == NULL){
-                errno = EINVAL;
-                perror("destroy_shm");
-                exit(EXIT_FAILURE);
-        }
-
-        if(-1 == munmap(shm->shmaddr, shm->size)){
-                perror("destroy_shm");
-                exit(EXIT_FAILURE);
-        }
-
-        if(-1 == close(shm->fd)){
-                perror("destroy_shm");
-                exit(EXIT_FAILURE);
-        }
-
-        if(-1 == shm_unlink(shm->name)){
-                perror("destroy_shm");
-                exit(EXIT_FAILURE);
-        }
-        
-        free(shm->name);
-        free(shm);
 }
 
 ShmADT open_shm(const char * restrict name, size_t size, int open_flag, int mode, int prot){
@@ -115,6 +90,32 @@ ShmADT open_shm(const char * restrict name, size_t size, int open_flag, int mode
         return opened_shm;
 }
 
+void destroy_shm(ShmADT shm){
+        if(shm == NULL){
+                errno = EINVAL;
+                perror("destroy_shm");
+                exit(EXIT_FAILURE);
+        }
+
+        if(-1 == munmap(shm->shmaddr, shm->size)){
+                perror("destroy_shm");
+                exit(EXIT_FAILURE);
+        }
+
+        if(-1 == close(shm->fd)){
+                perror("destroy_shm");
+                exit(EXIT_FAILURE);
+        }
+
+        if(-1 == shm_unlink(shm->name)){
+                perror("destroy_shm");
+                exit(EXIT_FAILURE);
+        }
+        
+        free(shm->name);
+        free(shm);
+}
+
 void close_shm(ShmADT shm){
         if(shm == NULL){
                 errno = EINVAL;
@@ -139,7 +140,7 @@ void close_shm(ShmADT shm){
 void * get_shm_pointer(ShmADT shm){
         if(shm == NULL){
                 errno = EINVAL;
-                perror("close_shm");
+                perror("get_shm_pointer");
                 exit(EXIT_FAILURE);
         }
 
