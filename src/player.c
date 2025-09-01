@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <errno.h>
 #include <signal.h>
 #include <unistd.h>
@@ -60,7 +61,7 @@ static bool parse_args(int argc, char **argv, PlayerArgs *out_args)
   if (argc != 3)
   {
     errno = EINVAL;
-    perror("player: invalid usage");
+    fprintf(stderr, "player: invalid usage. Usage: %s <width> <height>\n", argv[0]);
     return false;
   }
 
@@ -69,7 +70,9 @@ static bool parse_args(int argc, char **argv, PlayerArgs *out_args)
   if (out_args->width == 0 || out_args->height == 0)
   {
     errno = EINVAL;
-    perror("player: invalid dimensions");
+    fprintf(stderr,
+            "player: invalid dimensions: width=%lu height=%lu (must be > 0)\n",
+            out_args->width, out_args->height);
     return false;
   }
   return true;
@@ -82,7 +85,9 @@ static bool init_resources(const PlayerArgs *args, PlayerResources *out_res)
   out_res->state_shm = open_shm(GAME_STATE_SHM_NAME, map_size, O_RDONLY, 0600, PROT_READ);
   if (out_res->state_shm == NULL)
   {
-    perror("player: open_shm(state)");
+    fprintf(stderr,
+            "player: failed to open shm '%s' (read-only, size=%zu): %s\n",
+            GAME_STATE_SHM_NAME, map_size, strerror(errno));
     return false;
   }
   out_res->state = (GameState *)get_shm_pointer(out_res->state_shm);
@@ -90,7 +95,9 @@ static bool init_resources(const PlayerArgs *args, PlayerResources *out_res)
   out_res->sync_shm = open_shm(GAME_SYNC_SHM_NAME, sizeof(GameSync), O_RDWR, 0600, PROT_READ | PROT_WRITE);
   if (out_res->sync_shm == NULL)
   {
-    perror("player: open_shm(sync)");
+    fprintf(stderr,
+            "player: failed to open shm '%s' (read/write, size=%zu): %s\n",
+            GAME_SYNC_SHM_NAME, sizeof(GameSync), strerror(errno));
     close_shm(out_res->state_shm);
     return false;
   }
@@ -114,7 +121,7 @@ static void run_player_loop(GameState *state, GameSync *sync)
   if (!found)
   {
     errno = ENOENT;
-    perror("player: pid not registered");
+    fprintf(stderr, "player: PID %d not registered in GameState: %s\n", (int)mypid, strerror(errno));
     return;
   }
 
@@ -129,7 +136,7 @@ static void run_player_loop(GameState *state, GameSync *sync)
     {
       if (errno == EINTR)
         continue;
-      perror("player: sem_wait(player_can_move)");
+      fprintf(stderr, "player: error in sem_wait(player_can_move[%u]): %s\n", me, strerror(errno));
       break;
     }
 
@@ -154,7 +161,7 @@ static void run_player_loop(GameState *state, GameSync *sync)
     if (w != 1)
     {
       if (errno != 0)
-        perror("player: write(stdout)");
+        fprintf(stderr, "player: failed to write direction to stdout (pid=%d): %s\n", (int)mypid, strerror(errno));
       break;
     }
   }

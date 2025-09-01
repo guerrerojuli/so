@@ -159,7 +159,7 @@ static bool parse_args(int argc, char **argv, ViewArgs *out_args)
     if (argc != 3)
     {
         errno = EINVAL;
-        perror("view: invalid usage");
+        fprintf(stderr, "view: invalid usage. Usage: %s <width> <height>\n", argv[0]);
         return false;
     }
 
@@ -168,7 +168,9 @@ static bool parse_args(int argc, char **argv, ViewArgs *out_args)
     if (out_args->width == 0 || out_args->height == 0)
     {
         errno = EINVAL;
-        perror("view: invalid dimensions");
+        fprintf(stderr,
+                "view: invalid dimensions: width=%lu height=%lu (must be > 0)\n",
+                out_args->width, out_args->height);
         return false;
     }
     return true;
@@ -181,7 +183,9 @@ static bool init_resources(const ViewArgs *args, ViewResources *out_res)
     out_res->state_shm = open_shm(GAME_STATE_SHM_NAME, map_size, O_RDONLY, 0600, PROT_READ);
     if (out_res->state_shm == NULL)
     {
-        perror("view: open_shm(state)");
+        fprintf(stderr,
+                "view: failed to open shm '%s' (read-only, size=%zu): %s\n",
+                GAME_STATE_SHM_NAME, map_size, strerror(errno));
         return false;
     }
     out_res->state = (GameState *)get_shm_pointer(out_res->state_shm);
@@ -189,7 +193,9 @@ static bool init_resources(const ViewArgs *args, ViewResources *out_res)
     out_res->sync_shm = open_shm(GAME_SYNC_SHM_NAME, sizeof(GameSync), O_RDWR, 0600, PROT_READ | PROT_WRITE);
     if (out_res->sync_shm == NULL)
     {
-        perror("view: open_shm(sync)");
+        fprintf(stderr,
+                "view: failed to open shm '%s' (read/write, size=%zu): %s\n",
+                GAME_SYNC_SHM_NAME, sizeof(GameSync), strerror(errno));
         close_shm(out_res->state_shm);
         return false;
     }
@@ -201,7 +207,9 @@ static bool init_resources(const ViewArgs *args, ViewResources *out_res)
 
     if (out_res->owner_map == NULL || out_res->head_map == NULL)
     {
-        perror("view: malloc(owner_map/head_map)");
+        fprintf(stderr,
+                "view: out of memory for maps (cells=%zu, owner_map=%zu bytes, head_map=%zu bytes): %s\n",
+                cells, cells * sizeof(int), cells * sizeof(int), strerror(errno));
         close_shm(out_res->sync_shm);
         close_shm(out_res->state_shm);
         free(out_res->owner_map); // It's ok to free(NULL)
@@ -251,7 +259,9 @@ static void run_view_loop(ViewResources *res)
         {
             if (errno == EINTR)
                 continue;
-            perror("view: sem_wait(view_update_ready)");
+            fprintf(stderr,
+                    "view: error in sem_wait(view_update_ready): %s\n",
+                    strerror(errno));
             break;
         }
         game_sync_reader_enter(sync);
@@ -281,7 +291,9 @@ static void run_view_loop(ViewResources *res)
 
         if (sem_post(&sync->view_print_done) == -1)
         {
-            perror("view: sem_post(view_print_done)");
+            fprintf(stderr,
+                    "view: error in sem_post(view_print_done): %s\n",
+                    strerror(errno));
             break;
         }
     }
