@@ -8,7 +8,7 @@
 #define GAME_STATE_SHM_NAME "/game_state"
 
 // From game_sync.h
-#define GAME_SYNC_SHM_NAME "/chomp_sync"
+#define GAME_SYNC_SHM_NAME "/game_sync"
 
 // From view.c
 static const short BASE_COLORS[] = {COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE};
