@@ -3,9 +3,7 @@
 
 #include <stdbool.h>
 #include <sys/types.h>
-
-#define MAX_PLAYERS 9
-#define GAME_STATE_SHM_NAME "/game_state"
+#include "constants.h"
 
 typedef struct
 {

@@ -2,9 +2,7 @@
 #define GAME_SYNC_H
 
 #include <semaphore.h>
-#include "game_state.h"
-
-#define GAME_SYNC_SHM_NAME "/game_sync"
+#include "constants.h"
 
 typedef struct
 {

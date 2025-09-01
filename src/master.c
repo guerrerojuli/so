@@ -10,9 +10,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "headers/shmADT.h"
+#include "shmADT.h"
 
-int main(int argc, char **argv) {
-
-
+int main(int argc, char **argv)
+{
 }

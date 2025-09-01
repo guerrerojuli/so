@@ -5,7 +5,7 @@ CSTD ?= -std=c11
 WARN ?= -Wall -Wextra -Wpedantic
 OPT  ?= -O2
 DBG  ?= -g
-CFLAGS ?= $(CSTD) $(WARN) $(OPT) $(DBG)
+CFLAGS ?= $(CSTD) $(WARN) $(OPT) $(DBG) -Iinclude
 
 LIBS_COMMON :=
 LIBS_VIEW   := -lncurses
@@ -18,28 +18,28 @@ else ifeq ($(UNAME_S),Darwin)
 endif
 
 BINS := view player
-OBJS_COMMON := game_sync.o utils/shmADT.o
+OBJS_COMMON := src/utils/game_sync.o src/utils/shmADT.o src/utils/game_logic.o
 
 .PHONY: all clean format
 
 all: $(BINS)
 
-view: view.o $(OBJS_COMMON)
+view: src/view.o $(OBJS_COMMON)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON) $(LIBS_VIEW)
 
-player: player.o $(OBJS_COMMON)
+player: src/player.o $(OBJS_COMMON)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON) $(LIBS_PLAYER)
 
-%.o: %.c
+src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-utils/shmADT.o: utils/shmADT.c headers/shmADT.h
-	$(CC) $(CFLAGS) -c utils/shmADT.c -o utils/shmADT.o
+src/utils/%.o: src/utils/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(BINS) *.o utils/*.o
+	rm -f $(BINS) src/*.o src/utils/*.o
 
 format:
-	@command -v clang-format >/dev/null 2>&1 && clang-format -i *.c *.h || echo "clang-format no encontrado; omitiendo formato"
+	@command -v clang-format >/dev/null 2>&1 && clang-format -i src/*.c src/headers/*.h || echo "clang-format no encontrado; omitiendo formato"
 
 

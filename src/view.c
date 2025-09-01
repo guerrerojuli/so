@@ -8,15 +8,16 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <ncurses.h>
+#include <stdbool.h> // Added for bool type
 
+#include "constants.h"
 #include "game_state.h"
 #include "game_sync.h"
-#include "headers/shmADT.h"
+#include "shmADT.h"
+#include "view.h"
 
 static volatile sig_atomic_t stop_requested = 0;
 static int colors_ok = 0;
-static const short BASE_COLORS[] = {COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE};
-static const int NUM_BASE_COLORS = (int)(sizeof(BASE_COLORS) / sizeof(BASE_COLORS[0]));
 
 static inline short player_color_pair(unsigned int idx)
 {
@@ -137,52 +138,87 @@ static void print_players(const GameState *state)
 
 /* Usa implementación común en game_sync.c */
 
-int main(int argc, char **argv)
+typedef struct
+{
+    unsigned long width;
+    unsigned long height;
+} ViewArgs;
+
+typedef struct
+{
+    ShmADT state_shm;
+    GameState *state;
+    ShmADT sync_shm;
+    GameSync *sync;
+    int *owner_map;
+    int *head_map;
+} ViewResources;
+
+static bool parse_args(int argc, char **argv, ViewArgs *out_args)
 {
     if (argc != 3)
     {
         errno = EINVAL;
         perror("view: invalid usage");
-        return 1;
+        return false;
     }
 
-    unsigned long width = strtoul(argv[1], NULL, 10);
-    unsigned long height = strtoul(argv[2], NULL, 10);
-    if (width == 0 || height == 0)
+    out_args->width = strtoul(argv[1], NULL, 10);
+    out_args->height = strtoul(argv[2], NULL, 10);
+    if (out_args->width == 0 || out_args->height == 0)
     {
         errno = EINVAL;
         perror("view: invalid dimensions");
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    size_t map_size = GAME_STATE_MAP_SIZE(width, height);
+static bool init_resources(const ViewArgs *args, ViewResources *out_res)
+{
+    size_t map_size = GAME_STATE_MAP_SIZE(args->width, args->height);
 
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_sigint;
-    sigaction(SIGINT, &sa, NULL);
+    out_res->state_shm = open_shm(GAME_STATE_SHM_NAME, map_size, O_RDONLY, 0600, PROT_READ);
+    if (out_res->state_shm == NULL)
+    {
+        perror("view: open_shm(state)");
+        return false;
+    }
+    out_res->state = (GameState *)get_shm_pointer(out_res->state_shm);
 
-    ShmADT state_shm = open_shm(GAME_STATE_SHM_NAME, map_size, O_RDONLY, 0600, PROT_READ);
-    GameState *state = (GameState *)get_shm_pointer(state_shm);
+    out_res->sync_shm = open_shm(GAME_SYNC_SHM_NAME, sizeof(GameSync), O_RDWR, 0600, PROT_READ | PROT_WRITE);
+    if (out_res->sync_shm == NULL)
+    {
+        perror("view: open_shm(sync)");
+        close_shm(out_res->state_shm);
+        return false;
+    }
+    out_res->sync = (GameSync *)get_shm_pointer(out_res->sync_shm);
 
-    ShmADT sync_shm = open_shm(GAME_SYNC_SHM_NAME, sizeof(GameSync), O_RDWR, 0600, PROT_READ | PROT_WRITE);
-    GameSync *sync = (GameSync *)get_shm_pointer(sync_shm);
+    size_t cells = (size_t)out_res->state->width * (size_t)out_res->state->height;
+    out_res->owner_map = (int *)malloc(cells * sizeof(int));
+    out_res->head_map = (int *)malloc(cells * sizeof(int));
 
-    size_t cells = (size_t)state->width * (size_t)state->height;
-    int *owner_map = (int *)malloc(cells * sizeof(int));
-    int *head_map = (int *)malloc(cells * sizeof(int));
-    if (owner_map == NULL || head_map == NULL)
+    if (out_res->owner_map == NULL || out_res->head_map == NULL)
     {
         perror("view: malloc(owner_map/head_map)");
-        close_shm(sync_shm);
-        close_shm(state_shm);
-        return 1;
+        close_shm(out_res->sync_shm);
+        close_shm(out_res->state_shm);
+        free(out_res->owner_map); // It's ok to free(NULL)
+        free(out_res->head_map);
+        return false;
     }
-    for (size_t i = 0; i < cells; ++i)
-        owner_map[i] = -1;
-    for (size_t i = 0; i < cells; ++i)
-        head_map[i] = -1;
 
+    for (size_t i = 0; i < cells; ++i)
+        out_res->owner_map[i] = -1;
+    for (size_t i = 0; i < cells; ++i)
+        out_res->head_map[i] = -1;
+
+    return true;
+}
+
+static void init_ncurses()
+{
     if (!getenv("TERM"))
         setenv("TERM", "xterm-256color", 1);
     initscr();
@@ -199,6 +235,15 @@ int main(int argc, char **argv)
         }
         colors_ok = 1;
     }
+}
+
+static void run_view_loop(ViewResources *res)
+{
+    GameState *state = res->state;
+    GameSync *sync = res->sync;
+    int *owner_map = res->owner_map;
+    int *head_map = res->head_map;
+    size_t cells = (size_t)state->width * (size_t)state->height;
 
     while (!stop_requested)
     {
@@ -240,11 +285,41 @@ int main(int argc, char **argv)
             break;
         }
     }
+}
 
+static void cleanup_resources(ViewResources *res)
+{
     endwin();
-    free(owner_map);
-    free(head_map);
-    close_shm(sync_shm);
-    close_shm(state_shm);
+    free(res->owner_map);
+    free(res->head_map);
+    close_shm(res->sync_shm);
+    close_shm(res->state_shm);
+}
+
+int main(int argc, char **argv)
+{
+    ViewArgs args;
+    if (!parse_args(argc, argv, &args))
+    {
+        return 1;
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_sigint;
+    sigaction(SIGINT, &sa, NULL);
+
+    ViewResources res;
+    if (!init_resources(&args, &res))
+    {
+        return 1;
+    }
+
+    init_ncurses();
+
+    run_view_loop(&res);
+
+    cleanup_resources(&res);
+
     return 0;
 }
