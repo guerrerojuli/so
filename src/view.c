@@ -112,7 +112,7 @@ static void print_players(const GameState *state)
     if (box_w < 10)
         box_w = 10;
     char title[64];
-    snprintf(title, sizeof(title), "Players (%u)", state->player_count);
+    snprintf(title, sizeof(title), "Players: %u", state->player_count);
     draw_box(start_y, 0, list_rows + 2, box_w, title);
 
     for (unsigned int i = 0; i < state->player_count && i < MAX_PLAYERS; ++i)
@@ -122,7 +122,7 @@ static void print_players(const GameState *state)
         if (pair)
             attron(COLOR_PAIR(pair));
         mvprintw(start_y + 1 + (int)i, 1,
-                 "- #%u name=%s score=%u pos=(%u,%u) valid=%u invalid=%u blocked=%s",
+                 "Player %u - %s | Points %u | Pos %u,%u | Moves: %u ok, %u invalid | %s",
                  i,
                  p->name,
                  p->score,
@@ -130,7 +130,7 @@ static void print_players(const GameState *state)
                  (unsigned)p->y,
                  p->valid_move_requests,
                  p->invalid_move_requests,
-                 p->blocked ? "true" : "false");
+                 p->blocked ? "Blocked" : "Active");
         if (pair)
             attroff(COLOR_PAIR(pair));
     }
