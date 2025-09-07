@@ -21,4 +21,15 @@ typedef struct
 void game_sync_reader_enter(GameSync *sync);
 void game_sync_reader_exit(GameSync *sync);
 
+/* Writer-side of fair RW-lock used by master */
+void game_sync_writer_enter(GameSync *sync);
+void game_sync_writer_exit(GameSync *sync);
+
+/* Securely executes a callback with read-only access to the game state */
+void game_sync_run_as_reader(GameSync *sync, GameState *state, void (*callback)(GameState *state, void *context), void *context);
+
+/* Securely executes a callback with write access to the game state */
+void game_sync_run_as_writer(GameSync *sync, GameState *state, void (*callback)(GameState *state, void *context), void *context);
+
+
 #endif /* GAME_SYNC_H */
