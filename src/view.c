@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200809L
+#define _POSIX_C_SOURCE 200809L // para usar setenv y sigaction
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <ncurses.h>
-#include <stdbool.h> // Added for bool type
+#include <stdbool.h>
 
 #include "constants.h"
 #include "game_state.h"
@@ -136,8 +136,6 @@ static void print_players(const GameState *state)
     }
 }
 
-/* Usa implementación común en game_sync.c */
-
 typedef struct
 {
     unsigned long width;
@@ -212,7 +210,7 @@ static bool init_resources(const ViewArgs *args, ViewResources *out_res)
                 cells, cells * sizeof(int), cells * sizeof(int), strerror(errno));
         close_shm(out_res->sync_shm);
         close_shm(out_res->state_shm);
-        free(out_res->owner_map); // It's ok to free(NULL)
+        free(out_res->owner_map);
         free(out_res->head_map);
         return false;
     }
@@ -228,7 +226,7 @@ static bool init_resources(const ViewArgs *args, ViewResources *out_res)
 static void init_ncurses()
 {
     if (!getenv("TERM"))
-        setenv("TERM", "xterm-256color", 1);
+        setenv("TERM", "xterm-256color", 1); // para usar colores en ncurses
     initscr();
     cbreak();
     noecho();
@@ -264,6 +262,8 @@ static void run_view_loop(ViewResources *res)
                     strerror(errno));
             break;
         }
+
+        bool finished = false;
         game_sync_reader_enter(sync);
         clear();
         attron(A_BOLD);
@@ -277,8 +277,8 @@ static void run_view_loop(ViewResources *res)
             unsigned int py = state->players[i].y;
             if (px < state->width && py < state->height)
             {
-                owner_map[py * state->width + px] = (int)i; /* persist visited */
-                head_map[py * state->width + px] = (int)i;  /* current head */
+                owner_map[py * state->width + px] = (int)i;
+                head_map[py * state->width + px] = (int)i;
             }
         }
         print_board(state, owner_map, head_map);
@@ -286,7 +286,7 @@ static void run_view_loop(ViewResources *res)
         mvprintw((int)state->height + 3 + (int)state->player_count + 2, 0,
                  "finished=%s", state->finished ? "true" : "false");
         refresh();
-
+        finished = state->finished;
         game_sync_reader_exit(sync);
 
         if (sem_post(&sync->view_print_done) == -1)
@@ -296,16 +296,27 @@ static void run_view_loop(ViewResources *res)
                     strerror(errno));
             break;
         }
+
+        if (finished)
+        {
+            break;
+        }
     }
 }
 
 static void cleanup_resources(ViewResources *res)
 {
+    (void)res; // El parámetro no se usa intencionalmente para evitar la condición de carrera. REVISAR LUEGO
     endwin();
     free(res->owner_map);
     free(res->head_map);
-    close_shm(res->sync_shm);
-    close_shm(res->state_shm);
+    // El master es responsable de desvincular la memoria compartida (shm_unlink).
+    // El sistema operativo automáticamente des-mapea la memoria y cierra el
+    // file descriptor cuando el proceso termina. Llamar a close_shm() aquí
+    // podría causar una condición de carrera si el master desvincula la SHM
+    // antes de que este proceso haya terminado su limpieza.
+    // close_shm(res->sync_shm);
+    // close_shm(res->state_shm);
 }
 
 int main(int argc, char **argv)

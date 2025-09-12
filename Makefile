@@ -17,12 +17,15 @@ else ifeq ($(UNAME_S),Darwin)
   LIBS_COMMON += -pthread
 endif
 
-BINS := view player
+BINS := master view player
 OBJS_COMMON := src/utils/game_sync.o src/utils/shmADT.o src/utils/game_logic.o
 
 .PHONY: all clean format
 
 all: $(BINS)
+
+master: src/master.o $(OBJS_COMMON)
+	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON)
 
 view: src/view.o $(OBJS_COMMON)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS_COMMON) $(LIBS_VIEW)
