@@ -159,29 +159,29 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    printf("Configuración del juego:\\n");
-    printf("  Ancho: %u\\n", args.width);
-    printf("  Alto: %u\\n", args.height);
-    printf("  Jugadores: %d\\n", args.player_count);
+    printf("Configuración del juego:\n");
+    printf("  Ancho: %u\n", args.width);
+    printf("  Alto: %u\n", args.height);
+    printf("  Jugadores: %d\n", args.player_count);
     for(int i = 0; i < args.player_count; i++) {
-        printf("    - %s\\n", args.player_paths[i]);
+        printf("    - %s\n", args.player_paths[i]);
     }
 
     GameResources resources = {0};
     if (!init_game_resources(&args, &resources)) {
-        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\\n");
+        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\n");
         // La limpieza ya se hizo dentro de init_game_resources en caso de fallo
         return EXIT_FAILURE;
     }
     
-    printf("Recursos del juego inicializados correctamente.\\n");
+    printf("Recursos del juego inicializados correctamente.\n");
 
     // TODO: Fase 2 - Lanzar procesos hijos
     // TODO: Fase 3 - Bucle principal del juego
     
-    printf("Limpiando recursos...\\n");
+    printf("Limpiando recursos...\n");
     cleanup_game_resources(&resources);
-    printf("Recursos limpiados. Saliendo.\\n");
+    printf("Recursos limpiados. Saliendo.\n");
 
     return EXIT_SUCCESS;
 }
