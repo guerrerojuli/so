@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <semaphore.h>
 #include <time.h>
+#include <math.h>
 
 #include "shmADT.h"
 #include "game_state.h"
@@ -115,7 +116,7 @@ static void init_game_state(const MasterArgs *args, GameResources *res) {
         state->board[i] = 1 + (rand() % 9); // Recompensas entre 1 y 9
     }
 
-    // Inicializar y posicionar a los jugadores
+    // Inicializar y posicionar a los jugadores (distribución elíptica determinística)
     for (int i = 0; i < args->player_count; i++) {
         Player *p = &state->players[i];
         p->pid = res->player_pids[i];
@@ -125,17 +126,22 @@ static void init_game_state(const MasterArgs *args, GameResources *res) {
         p->invalid_move_requests = 0;
         p->blocked = false;
 
-        // Lógica de spawn simple: en las esquinas y puntos intermedios - REVISAR LUEGO
-        switch(i) {
-            case 0: p->x = 0; p->y = 0; break;
-            case 1: p->x = state->width - 1; p->y = state->height - 1; break;
-            case 2: p->x = 0; p->y = state->height - 1; break;
-            case 3: p->x = state->width - 1; p->y = 0; break;
-            default: // Posiciones aleatorias para más jugadores, evitando bordes
-                p->x = 1 + (rand() % (state->width - 2));
-                p->y = 1 + (rand() % (state->height - 2));
-                break;
-        }
+        // Cálculo delíptico alrededor del centro del tablero
+        double radius_x = ((double)state->width) / 2.75;
+        double radius_y = ((double)state->height) / 2.75;
+        if (radius_x < 1.0) radius_x = 1.0;
+        if (radius_y < 1.0) radius_y = 1.0;
+        int center_x = (int)state->width / 2;
+        int center_y = (int)state->height / 2;
+
+        double theta = (2.0 * M_PI * (double)i) / (double)state->player_count;
+        int tx = center_x + (int)lround(radius_x * cos(theta));
+        int ty = center_y + (int)lround(radius_y * sin(theta));
+        tx = clampi(tx, 0, (int)state->width - 1);
+        ty = clampi(ty, 0, (int)state->height - 1);
+
+        p->x = (unsigned short)tx;
+        p->y = (unsigned short)ty;
         // Marcar la celda de spawn como ocupada por el jugador, según el enunciado (-id).
         state->board[p->y * state->width + p->x] = -(i);
     }

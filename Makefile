@@ -5,9 +5,9 @@ CSTD ?= -std=c11
 WARN ?= -Wall -Wextra -Wpedantic
 OPT  ?= -O2
 DBG  ?= -g
-CFLAGS ?= $(CSTD) $(WARN) $(OPT) $(DBG) -Iinclude
+CFLAGS ?= $(CSTD) $(WARN) $(OPT) $(DBG) -Iinclude -D_DEFAULT_SOURCE
 
-LIBS_COMMON :=
+LIBS_COMMON := -lm
 LIBS_VIEW   := -lncurses
 LIBS_PLAYER :=
 
@@ -44,5 +44,3 @@ clean:
 
 format:
 	@command -v clang-format >/dev/null 2>&1 && clang-format -i src/*.c src/headers/*.h || echo "clang-format no encontrado; omitiendo formato"
-
-
