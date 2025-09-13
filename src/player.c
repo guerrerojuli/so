@@ -106,14 +106,13 @@ static bool init_resources(const PlayerArgs *args, PlayerResources *out_res)
 
 static void cleanup_resources(PlayerResources *res)
 {
-  (void)res; // El parámetro no se usa intencionalmente para evitar la condición de carrera. Luego revisaremos esto
   // El master es responsable de desvincular la memoria compartida (shm_unlink).
-  // El sistema operativo automáticamente des-mapea la memoria y cierra el
-  // file descriptor cuando el proceso termina. Llamar a close_shm() aquí
-  // podría causar una condición de carrera si el master desvincula la SHM
-  // antes de que este proceso haya terminado su limpieza.
-  // close_shm(res->sync_shm);
-  // close_shm(res->state_shm);
+  // Aquí solo cerramos nuestra vista local (munmap/close y liberar wrapper),
+  // lo cual es seguro en presencia de shm_unlink del master.
+  if (res && res->sync_shm)
+    close_shm(res->sync_shm);
+  if (res && res->state_shm)
+    close_shm(res->state_shm);
 }
 
 static void run_player_loop(GameState *state, GameSync *sync)
