@@ -274,12 +274,12 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    printf("Configuración del juego:\\n");
-    printf("  Ancho: %u\\n", args.width);
-    printf("  Alto: %u\\n", args.height);
-    printf("  Jugadores: %d\\n", args.player_count);
+    printf("Configuración del juego:\n");
+    printf("  Ancho: %u\n", args.width);
+    printf("  Alto: %u\n", args.height);
+    printf("  Jugadores: %d\n", args.player_count);
     for(int i = 0; i < args.player_count; i++) {
-        printf("    - %s\\n", args.player_paths[i]);
+        printf("    - %s\n", args.player_paths[i]);
     }
 
     GameResources resources = {0}; // Inicializa todos los campos a 0/NULL
