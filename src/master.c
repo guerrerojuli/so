@@ -25,8 +25,8 @@ typedef struct {
     unsigned int delay;
     unsigned int timeout;
     unsigned int seed;
-    char *view_path; // binario de la view
-    char **player_paths; // binarios de los jugadores
+    char *view_path;
+    char *player_paths[MAX_PLAYERS];
     int player_count;
 } MasterArgs;
 
@@ -175,12 +175,11 @@ static bool parse_args(int argc, char **argv, MasterArgs *args) {
     args->timeout = DEFAULT_TIMEOUT;
     args->seed = time(NULL);
     args->view_path = NULL;
-    args->player_paths = NULL;
     args->player_count = 0;
 
     int opt;
-    bool players_found = false;
-    while ((opt = getopt(argc, argv, "w:h:d:t:s:v:p:")) != -1 && !players_found) {
+    bool players_set = false; // Se usa para aceptar solo el primer -p
+    while ((opt = getopt(argc, argv, "w:h:d:t:s:v:p:")) != -1) {
         switch (opt) {
             case 'w':
                 args->width = atoi(optarg);
@@ -201,16 +200,33 @@ static bool parse_args(int argc, char **argv, MasterArgs *args) {
                 args->view_path = optarg;
                 break;
             case 'p':
-                // optind es el índice del siguiente argumento a procesar.
-                // A partir de aquí son todas rutas de players.
-                optind--;
-                args->player_count = argc - optind;
-                if (args->player_count > MAX_PLAYERS) {
-                    fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
-                    return false;
+                // Aceptamos solo el primer grupo de jugadores (primer -p).
+                // Consumimos optarg (primer jugador) y luego todos los argumentos
+                // siguientes que no comiencen con '-' como jugadores adicionales.
+                if (!players_set) {
+                    players_set = true;
+                    // Primer jugador proviene de optarg
+                    if (args->player_count == MAX_PLAYERS) {
+                        fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                        return false;
+                    }
+                    args->player_paths[args->player_count++] = optarg;
+
+                    // Agregar jugadores adicionales hasta el próximo argumento que parezca opción
+                    while (optind < argc && argv[optind][0] != '-') {
+                        if (args->player_count == MAX_PLAYERS) {
+                            fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                            return false;
+                        }
+                        args->player_paths[args->player_count++] = argv[optind++];
+                    }
+                } else {
+                    // Ignorar -p adicionales: no agregar jugadores y saltar sus argumentos
+                    // para que getopt pueda seguir procesando opciones posteriores.
+                    while (optind < argc && argv[optind][0] != '-') {
+                        optind++;
+                    }
                 }
-                args->player_paths = &argv[optind];
-                players_found = true; // Salimos del bucle después de esto
                 break;
             default:
                 print_usage(argv[0]);
