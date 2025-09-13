@@ -50,6 +50,64 @@ typedef struct
     int *player_pipes;  // Array de file descriptors para los extremos de lectura
 } GameResources;
 
+static bool launch_player(const MasterArgs *args, GameResources *res, int player_index, const char *width_str, const char *height_str)
+{
+    int pipe_fds[2];
+    if (pipe(pipe_fds) == -1)
+    {
+        perror("Error al crear pipe");
+        return false;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1)
+    {
+        perror("Error en fork para jugador");
+        return false;
+    }
+
+    if (pid == 0)
+    {                           // Proceso hijo (jugador)
+        close(pipe_fds[R_END]); // El jugador no lee del pipe - R_END = 0
+        if (dup2(pipe_fds[W_END], STDOUT_FILENO) == -1)
+        {
+            perror("Error en dup2 para jugador");
+            exit(EXIT_FAILURE);
+        }
+        close(pipe_fds[W_END]); // no necesito mas el original
+
+        char *argv[] = {args->player_paths[player_index], (char *)width_str, (char *)height_str, NULL};
+        execv(args->player_paths[player_index], argv);
+        fprintf(stderr, "Error al ejecutar %s: %s\n", args->player_paths[player_index], strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    // Proceso padre (master)
+    close(pipe_fds[W_END]); // El master no escribe en el pipe - W_END = 1
+    res->player_pipes[player_index] = pipe_fds[R_END];
+    res->player_pids[player_index] = pid;
+    return true;
+}
+
+static bool launch_view(const MasterArgs *args, GameResources *res, const char *width_str, const char *height_str)
+{
+    pid_t pid = fork();
+    if (pid == -1)
+    {
+        perror("Error en fork para vista");
+        return false; // Aquí deberíamos limpiar los jugadores ya creados
+    }
+    if (pid == 0)
+    { // Proceso hijo (vista)
+        char *argv[] = {args->view_path, (char *)width_str, (char *)height_str, NULL};
+        execv(args->view_path, argv);
+        fprintf(stderr, "Error al ejecutar %s: %s\n", args->view_path, strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    res->view_pid = pid;
+    return true;
+}
+
 static bool launch_children(const MasterArgs *args, GameResources *res)
 {
     char width_str[16]; // para pasarle el ancho y alto al jugador y view
@@ -60,59 +118,19 @@ static bool launch_children(const MasterArgs *args, GameResources *res)
     // Lanzar jugadores
     for (int i = 0; i < args->player_count; i++)
     {
-        int pipe_fds[2];
-        if (pipe(pipe_fds) == -1)
+        if (!launch_player(args, res, i, width_str, height_str))
         {
-            perror("Error al crear pipe");
             return false;
         }
-
-        pid_t pid = fork();
-        if (pid == -1)
-        {
-            perror("Error en fork para jugador");
-            return false;
-        }
-
-        if (pid == 0)
-        {                           // Proceso hijo (jugador)
-            close(pipe_fds[R_END]); // El jugador no lee del pipe - R_END = 0
-            if (dup2(pipe_fds[W_END], STDOUT_FILENO) == -1)
-            {
-                perror("Error en dup2 para jugador");
-                exit(EXIT_FAILURE);
-            }
-            close(pipe_fds[W_END]); // no necesito mas el original
-
-            char *argv[] = {args->player_paths[i], width_str, height_str, NULL};
-            execv(args->player_paths[i], argv);
-            fprintf(stderr, "Error al ejecutar %s: %s\\n", args->player_paths[i], strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-
-        // Proceso padre (master)
-        close(pipe_fds[W_END]); // El master no escribe en el pipe - W_END = 1
-        res->player_pipes[i] = pipe_fds[R_END];
-        res->player_pids[i] = pid;
     }
 
     // Lanzar vista (si existe)
     if (args->view_path)
     {
-        pid_t pid = fork();
-        if (pid == -1)
+        if (!launch_view(args, res, width_str, height_str))
         {
-            perror("Error en fork para vista");
-            return false; // Aquí deberíamos limpiar los jugadores ya creados
+            return false;
         }
-        if (pid == 0)
-        { // Proceso hijo (vista)
-            char *argv[] = {args->view_path, width_str, height_str, NULL};
-            execv(args->view_path, argv);
-            fprintf(stderr, "Error al ejecutar %s: %s\\n", args->view_path, strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-        res->view_pid = pid;
     }
 
     return true;
