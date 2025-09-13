@@ -307,7 +307,7 @@ static void run_view_loop(ViewResources *res)
 static void cleanup_resources(ViewResources *res)
 {
     (void)res; // El parámetro no se usa intencionalmente para evitar la condición de carrera. REVISAR LUEGO
-    endwin();
+    endwin(); // vuelvo a la terminal normal
     free(res->owner_map);
     free(res->head_map);
     // El master es responsable de desvincular la memoria compartida (shm_unlink).

@@ -25,8 +25,8 @@ typedef struct {
     unsigned int delay;
     unsigned int timeout;
     unsigned int seed;
-    char *view_path;
-    char **player_paths;
+    char *view_path; // binario de la view
+    char **player_paths; // binarios de los jugadores
     int player_count;
 } MasterArgs;
 
@@ -36,7 +36,131 @@ typedef struct {
     GameState *state;
     ShmADT sync_shm;
     GameSync *sync;
+    pid_t *player_pids; // PIDs de los jugadores
+    pid_t view_pid; // PID de la view
+    int *player_pipes; // Array de file descriptors para los extremos de lectura
 } GameResources;
+
+
+static bool launch_children(const MasterArgs *args, GameResources *res) {
+    char width_str[16]; // para pasarle el ancho y alto al jugador y view
+    char height_str[16];
+    snprintf(width_str, sizeof(width_str), "%u", args->width);
+    snprintf(height_str, sizeof(height_str), "%u", args->height);
+
+    // Lanzar jugadores
+    for (int i = 0; i < args->player_count; i++) {
+        int pipe_fds[2];
+        if (pipe(pipe_fds) == -1) {
+            perror("Error al crear pipe");
+            return false;
+        }
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("Error en fork para jugador");
+            return false;
+        }
+
+        if (pid == 0) { // Proceso hijo (jugador)
+            close(pipe_fds[R_END]); // El jugador no lee del pipe - R_END = 0
+            if (dup2(pipe_fds[W_END], STDOUT_FILENO) == -1) {
+                perror("Error en dup2 para jugador");
+                exit(EXIT_FAILURE);
+            }
+            close(pipe_fds[W_END]); // no necesito mas el original
+
+            char *argv[] = {args->player_paths[i], width_str, height_str, NULL};
+            execv(args->player_paths[i], argv);
+            fprintf(stderr, "Error al ejecutar %s: %s\\n", args->player_paths[i], strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+
+        // Proceso padre (master)
+        close(pipe_fds[W_END]); // El master no escribe en el pipe - W_END = 1
+        res->player_pipes[i] = pipe_fds[R_END];
+        res->player_pids[i] = pid;
+    }
+
+    // Lanzar vista (si existe)
+    if (args->view_path) {
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("Error en fork para vista");
+            return false; // Aquí deberíamos limpiar los jugadores ya creados
+        }
+        if (pid == 0) { // Proceso hijo (vista)
+            char *argv[] = {args->view_path, width_str, height_str, NULL};
+            execv(args->view_path, argv);
+            fprintf(stderr, "Error al ejecutar %s: %s\\n", args->view_path, strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+        res->view_pid = pid;
+    }
+
+    return true;
+}
+
+static void init_game_state(const MasterArgs *args, GameResources *res) {
+    srand(args->seed);
+    
+    GameState *state = res->state;
+    state->width = args->width;
+    state->height = args->height;
+    state->player_count = args->player_count;
+    state->finished = false;
+
+    // Inicializar el tablero con recompensas aleatorias
+    for (unsigned int i = 0; i < state->width * state->height; i++) {
+        state->board[i] = 1 + (rand() % 9); // Recompensas entre 1 y 9
+    }
+
+    // Inicializar y posicionar a los jugadores
+    for (int i = 0; i < args->player_count; i++) {
+        Player *p = &state->players[i];
+        p->pid = res->player_pids[i];
+        snprintf(p->name, sizeof(p->name), "player %d", i);
+        p->score = 0;
+        p->valid_move_requests = 0;
+        p->invalid_move_requests = 0;
+        p->blocked = false;
+
+        // Lógica de spawn simple: en las esquinas y puntos intermedios - REVISAR LUEGO
+        switch(i) {
+            case 0: p->x = 0; p->y = 0; break;
+            case 1: p->x = state->width - 1; p->y = state->height - 1; break;
+            case 2: p->x = 0; p->y = state->height - 1; break;
+            case 3: p->x = state->width - 1; p->y = 0; break;
+            default: // Posiciones aleatorias para más jugadores, evitando bordes
+                p->x = 1 + (rand() % (state->width - 2));
+                p->y = 1 + (rand() % (state->height - 2));
+                break;
+        }
+        // Marcar la celda de spawn como ocupada por el jugador, según el enunciado (-id).
+        state->board[p->y * state->width + p->x] = -(i);
+    }
+}
+
+
+static void cleanup_game_resources(GameResources *res, int player_count) {
+    if (res->player_pipes) {
+        for (int i = 0; i < player_count; i++) {
+            if (res->player_pipes[i] != 0) {
+                close(res->player_pipes[i]);
+            }
+        }
+        free(res->player_pipes);
+    }
+     if (res->player_pids) {
+        free(res->player_pids);
+    }
+    if (res->state_shm) {
+        destroy_shm(res->state_shm);
+    }
+    if (res->sync_shm) {
+        destroy_shm(res->sync_shm);
+    }
+}
 
 
 static void print_usage(const char *exec_name) {
@@ -141,15 +265,6 @@ static bool init_game_resources(const MasterArgs *args, GameResources *res) {
     return true;
 }
 
-static void cleanup_game_resources(GameResources *res) {
-    if (res->state_shm) {
-        destroy_shm(res->state_shm);
-    }
-    if (res->sync_shm) {
-        destroy_shm(res->sync_shm);
-    }
-}
-
 
 // Hago un par de prints para ver que este funcionando bien la config del master
 int main(int argc, char **argv)
@@ -167,20 +282,45 @@ int main(int argc, char **argv)
         printf("    - %s\\n", args.player_paths[i]);
     }
 
-    GameResources resources = {0};
-    if (!init_game_resources(&args, &resources)) {
-        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\\n");
-        // La limpieza ya se hizo dentro de init_game_resources en caso de fallo
+    GameResources resources = {0}; // Inicializa todos los campos a 0/NULL
+    resources.player_pipes = (int *)calloc(args.player_count, sizeof(int));
+    resources.player_pids = (pid_t *)calloc(args.player_count, sizeof(pid_t));
+    if (!resources.player_pipes || !resources.player_pids) {
+        perror("Error al reservar memoria para recursos de hijos");
+        cleanup_game_resources(&resources, args.player_count);
         return EXIT_FAILURE;
     }
-    
+
+    if (!init_game_resources(&args, &resources)) {
+        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\\n");
+        cleanup_game_resources(&resources, args.player_count);
+        return EXIT_FAILURE;
+    }
     printf("Recursos del juego inicializados correctamente.\\n");
 
-    // TODO: Fase 2 - Lanzar procesos hijos
+    if (!launch_children(&args, &resources)) {
+        fprintf(stderr, "Error: No se pudieron lanzar los procesos hijos.\\n");
+        cleanup_game_resources(&resources, args.player_count);
+        return EXIT_FAILURE;
+    }
+    printf("Procesos hijos lanzados correctamente.\\n");
+
+    printf("Inicializando estado del juego...\\n");
+    init_game_state(&args, &resources);
+    printf("Estado del juego inicializado.\\n");
+
     // TODO: Fase 3 - Bucle principal del juego
+    // Espera simple a que los hijos terminen (temporal)
+    printf("Esperando a que los procesos hijos terminen...\\n");
+    for (int i = 0; i < args.player_count; i++) {
+        waitpid(resources.player_pids[i], NULL, 0);
+    }
+    if (resources.view_pid != 0) {
+        waitpid(resources.view_pid, NULL, 0);
+    }
     
     printf("Limpiando recursos...\\n");
-    cleanup_game_resources(&resources);
+    cleanup_game_resources(&resources, args.player_count);
     printf("Recursos limpiados. Saliendo.\\n");
 
     return EXIT_SUCCESS;
