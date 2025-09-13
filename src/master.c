@@ -14,11 +14,15 @@
 #include <time.h>
 #include <sys/select.h>
 #include <math.h>
-
 #include "shmADT.h"
 #include "game_state.h"
 #include "game_sync.h"
 #include "constants.h"
+
+// ---- Helpers for deterministic ellipse-based spawning ----
+static inline int clampi(int v, int lo, int hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
 
 // Estructura para almacenar los argumentos parseados
 typedef struct {
@@ -163,6 +167,11 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
         
         close(pipe_fd);
         res->player_pipes[player_idx] = -1; // Marcar como cerrado
+
+        // Notificar a la vista del cambio de estado (jugador bloqueado) para romper el deadlock
+        sem_post(&res->sync->view_update_ready);
+        sem_wait(&res->sync->view_print_done);
+
         return;
     }
 
@@ -421,7 +430,22 @@ int main(int argc, char **argv)
 
         if (active_players == 0) {
             printf("Todos los jugadores están bloqueados. El juego ha terminado.\\n");
-            game_finished = true;
+             
+            // Adquirir lock de escritor para actualizar el estado final
+            sem_wait(&resources.sync->master_starvation_guard);
+            sem_wait(&resources.sync->state_mutex);
+            sem_post(&resources.sync->master_starvation_guard);
+            
+            resources.state->finished = true;
+
+            // Liberar lock de escritor
+            sem_post(&resources.sync->state_mutex);
+
+            // Notificar a la vista por última vez para que vea finished=true
+            sem_post(&resources.sync->view_update_ready);
+            sem_wait(&resources.sync->view_print_done);
+
+            game_finished = true; // Romper el bucle local
             continue;
         }
 
