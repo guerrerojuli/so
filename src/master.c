@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <semaphore.h>
 #include <time.h>
+#include <sys/select.h>
 
 #include "shmADT.h"
 #include "game_state.h"
@@ -115,7 +116,7 @@ static void init_game_state(const MasterArgs *args, GameResources *res) {
         state->board[i] = 1 + (rand() % 9); // Recompensas entre 1 y 9
     }
 
-    // Inicializar y posicionar a los jugadores
+    // Inicializar jugadores
     for (int i = 0; i < args->player_count; i++) {
         Player *p = &state->players[i];
         p->pid = res->player_pids[i];
@@ -138,6 +139,73 @@ static void init_game_state(const MasterArgs *args, GameResources *res) {
         }
         // Marcar la celda de spawn como ocupada por el jugador, según el enunciado (-id).
         state->board[p->y * state->width + p->x] = -(i);
+    }
+}
+
+static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *args, GameResources *res) {
+    unsigned char move;
+    ssize_t bytes_read = read(pipe_fd, &move, sizeof(move));
+
+    if (bytes_read <= 0) { // EOF o error
+        if (bytes_read == 0) printf("Jugador %d se ha desconectado.\\n", player_idx);
+        else perror("Error al leer del pipe");
+        
+        // Bloqueamos al jugador para que no se le considere más
+        sem_wait(&res->sync->state_mutex);
+        res->state->players[player_idx].blocked = true;
+        sem_post(&res->sync->state_mutex);
+        
+        close(pipe_fd);
+        res->player_pipes[player_idx] = -1; // Marcar como cerrado
+        return;
+    }
+
+    // Adquirir bloqueo de escritor para modificar el estado
+    sem_wait(&res->sync->master_starvation_guard);
+    sem_wait(&res->sync->state_mutex);
+    sem_post(&res->sync->master_starvation_guard);
+
+    GameState *state = res->state;
+    Player *player = &state->players[player_idx];
+    bool is_valid = false;
+
+    // Calcular nuevas coordenadas (lógica simple, se puede refinar)
+    int dx[] = {0, 1, 1, 1, 0, -1, -1, -1};
+    int dy[] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    
+    if (move < 8) {
+        int nx = player->x + dx[move];
+        int ny = player->y + dy[move];
+
+        // Validar movimiento
+        if (nx >= 0 && nx < state->width && ny >= 0 && ny < state->height &&
+            state->board[ny * state->width + nx] > 0) {
+            
+            is_valid = true;
+            int reward = state->board[ny * state->width + nx];
+            player->score += reward;
+            player->x = nx;
+            player->y = ny;
+            state->board[ny * state->width + nx] = -(player_idx);
+            player->valid_move_requests++;
+        }
+    }
+    
+    if (!is_valid) {
+        player->invalid_move_requests++;
+    }
+
+    // Liberar bloqueo de escritor
+    sem_post(&res->sync->state_mutex);
+
+    // Notificar a la vista si hubo un movimiento válido
+    if (is_valid && args->view_path) {
+        sem_post(&res->sync->view_update_ready);
+        // TODO: Usar sem_timedwait para no bloquearse indefinidamente
+        sem_wait(&res->sync->view_print_done); 
+        
+        struct timespec delay = { .tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L };
+        nanosleep(&delay, NULL);
     }
 }
 
@@ -309,19 +377,104 @@ int main(int argc, char **argv)
     init_game_state(&args, &resources);
     printf("Estado del juego inicializado.\\n");
 
-    // TODO: Fase 3 - Bucle principal del juego
-    // Espera simple a que los hijos terminen (temporal)
-    printf("Esperando a que los procesos hijos terminen...\\n");
-    for (int i = 0; i < args.player_count; i++) {
-        waitpid(resources.player_pids[i], NULL, 0);
-    }
-    if (resources.view_pid != 0) {
-        waitpid(resources.view_pid, NULL, 0);
-    }
-    
-    printf("Limpiando recursos...\\n");
-    cleanup_game_resources(&resources, args.player_count);
-    printf("Recursos limpiados. Saliendo.\\n");
+    // Fase 3: Bucle principal del juego
+    bool game_finished = false;
+    int current_player_turn = 0;
+    fd_set read_fds;
+    int max_fd = 0;
 
-    return EXIT_SUCCESS;
+    while (!game_finished) {
+        FD_ZERO(&read_fds);
+        max_fd = 0; // Recalcular en cada iteración
+        int active_players = 0;
+        for (int i = 0; i < args.player_count; i++) {
+            if (!resources.state->players[i].blocked && resources.player_pipes[i] != -1) {
+                FD_SET(resources.player_pipes[i], &read_fds);
+                if (resources.player_pipes[i] > max_fd) {
+                    max_fd = resources.player_pipes[i];
+                }
+                active_players++;
+            }
+        }
+
+        if (active_players == 0) {
+            printf("Todos los jugadores están bloqueados. El juego ha terminado.\\n");
+            game_finished = true;
+            continue;
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = args.timeout;
+        timeout.tv_usec = 0;
+
+        int ready_fds = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (ready_fds == -1) {
+            perror("Error en select");
+            game_finished = true;
+            continue;
+        }
+
+        if (ready_fds == 0) {
+            printf("Timeout! El juego ha terminado.\\n");
+            game_finished = true;
+            continue;
+        }
+
+        // Lógica de Round-Robin
+        for (int i = 0; i < args.player_count; i++) {
+            int player_idx = (current_player_turn + i) % args.player_count;
+            int player_pipe = resources.player_pipes[player_idx];
+
+            if (FD_ISSET(player_pipe, &read_fds)) {
+                process_player_move(player_idx, player_pipe, &args, &resources);
+                
+                // Dar turno al siguiente jugador activo
+                int next_player = current_player_turn; // Empezar desde el actual
+                if (active_players > 0) {
+                    do {
+                        next_player = (next_player + 1) % args.player_count;
+                    } while (resources.state->players[next_player].blocked || resources.player_pipes[next_player] == -1);
+                    sem_post(&resources.sync->player_can_move[next_player]);
+                }
+
+                // Avanzar al siguiente jugador para la próxima ronda
+                current_player_turn = (player_idx + 1) % args.player_count;
+                break; // Procesar solo un jugador por iteración de select
+            }
+        }
+    }
+
+    printf("==== FIN DEL JUEGO ====\\n");
+
+    // Esperar a que los hijos terminen y reportar estado
+    for (int i = 0; i < args.player_count; i++) {
+        if (resources.player_pids[i] > 0) {
+            int status;
+            waitpid(resources.player_pids[i], &status, 0);
+            printf("Jugador %d (PID %d) terminó con puntaje: %d. ", i, resources.player_pids[i], resources.state->players[i].score);
+            if (WIFEXITED(status)) {
+                printf("Salida normal con código %d.\\n", WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf("Terminó por señal %d.\\n", WTERMSIG(status));
+            }
+        }
+    }
+
+    if (resources.view_pid > 0) {
+        int status;
+        // Podríamos enviar una señal a la vista para que termine limpiamente,
+        // pero por ahora, un simple waitpid es suficiente.
+        waitpid(resources.view_pid, &status, 0);
+        printf("Vista (PID %d) terminó. ", resources.view_pid);
+        if (WIFEXITED(status)) {
+            printf("Salida normal con código %d.\\n", WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Terminó por señal %d.\\n", WTERMSIG(status));
+        }
+    }
+
+
+    cleanup_game_resources(&resources, args.player_count);
+    return 0;
 }
