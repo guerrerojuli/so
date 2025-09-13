@@ -14,6 +14,7 @@
 #include <time.h>
 #include <sys/select.h>
 #include <math.h>
+#include <stdarg.h>
 #include "shmADT.h"
 #include "game_state.h"
 #include "game_sync.h"
@@ -368,6 +369,9 @@ static bool init_game_resources(const MasterArgs *args, GameResources *res) {
 // Hago un par de prints para ver que este funcionando bien la config del master
 int main(int argc, char **argv)
 {
+    // Desbufferizar stderr para ver logs en tiempo real aunque ncurses esté activo
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     MasterArgs args;
     if (!parse_args(argc, argv, &args)) {
         return EXIT_FAILURE;
@@ -391,28 +395,30 @@ int main(int argc, char **argv)
     }
 
     if (!init_game_resources(&args, &resources)) {
-        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\\n");
+        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\n");
         cleanup_game_resources(&resources, args.player_count);
         return EXIT_FAILURE;
     }
-    printf("Recursos del juego inicializados correctamente.\\n");
+    printf("Recursos del juego inicializados correctamente.\n");
 
     if (!launch_children(&args, &resources)) {
-        fprintf(stderr, "Error: No se pudieron lanzar los procesos hijos.\\n");
+        fprintf(stderr, "Error: No se pudieron lanzar los procesos hijos.\n");
         cleanup_game_resources(&resources, args.player_count);
         return EXIT_FAILURE;
     }
-    printf("Procesos hijos lanzados correctamente.\\n");
+    printf("Procesos hijos lanzados correctamente.\n");
 
-    printf("Inicializando estado del juego...\\n");
+    printf("Inicializando estado del juego...\n");
     init_game_state(&args, &resources);
-    printf("Estado del juego inicializado.\\n");
+    printf("Estado del juego inicializado.\n");
 
     // Fase 3: Bucle principal del juego
     bool game_finished = false;
     int current_player_turn = 0;
     fd_set read_fds;
     int max_fd = 0;
+
+    fprintf(stderr, "[master] entrando al bucle de juego\n");
 
     while (!game_finished) {
         FD_ZERO(&read_fds);
@@ -428,8 +434,11 @@ int main(int argc, char **argv)
             }
         }
 
+        fprintf(stderr, "[master] activos=%d\n", active_players);
+
         if (active_players == 0) {
-            printf("Todos los jugadores están bloqueados. El juego ha terminado.\\n");
+            printf("Todos los jugadores están bloqueados. El juego ha terminado.\n");
+            fprintf(stderr, "[master] detectado fin: activos=0, seteando finished y notificando view\n");
              
             // Adquirir lock de escritor para actualizar el estado final
             sem_wait(&resources.sync->master_starvation_guard);
@@ -446,6 +455,8 @@ int main(int argc, char **argv)
             sem_wait(&resources.sync->view_print_done);
 
             game_finished = true; // Romper el bucle local
+            
+            fprintf(stderr, "[master] saliendo del bucle principal (fin detectado)\n");
             continue;
         }
 
@@ -453,7 +464,9 @@ int main(int argc, char **argv)
         timeout.tv_sec = args.timeout;
         timeout.tv_usec = 0;
 
+        fprintf(stderr, "[master] llamando a select(max_fd=%d, timeout=%u s)\n", max_fd, args.timeout);
         int ready_fds = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        fprintf(stderr, "[master] select retornó %d\n", ready_fds);
 
         if (ready_fds == -1) {
             perror("Error en select");
@@ -462,7 +475,8 @@ int main(int argc, char **argv)
         }
 
         if (ready_fds == 0) {
-            printf("Timeout! El juego ha terminado.\\n");
+            printf("Timeout! El juego ha terminado.\n");
+            fprintf(stderr, "[master] timeout en select -> fin de juego\n");
             game_finished = true;
             continue;
         }
@@ -473,15 +487,51 @@ int main(int argc, char **argv)
             int player_pipe = resources.player_pipes[player_idx];
 
             if (FD_ISSET(player_pipe, &read_fds)) {
+                fprintf(stderr, "[master] turno jugador=%d (fd=%d)\n", player_idx, player_pipe);
                 process_player_move(player_idx, player_pipe, &args, &resources);
                 
-                // Dar turno al siguiente jugador activo
-                int next_player = current_player_turn; // Empezar desde el actual
-                if (active_players > 0) {
-                    do {
-                        next_player = (next_player + 1) % args.player_count;
-                    } while (resources.state->players[next_player].blocked || resources.player_pipes[next_player] == -1);
-                    sem_post(&resources.sync->player_can_move[next_player]);
+                // Recalcular jugadores activos después de procesar el movimiento
+                int remaining_active = 0;
+                for (int p = 0; p < args.player_count; p++) {
+                    if (!resources.state->players[p].blocked && resources.player_pipes[p] != -1) {
+                        remaining_active++;
+                    }
+                }
+
+                if (remaining_active == 0) {
+                    fprintf(stderr, "[master] remaining_active=0 tras jugada -> seteando finished y saliendo\n");
+                    // Adquirir lock de escritor para actualizar el estado final
+                    sem_wait(&resources.sync->master_starvation_guard);
+                    sem_wait(&resources.sync->state_mutex);
+                    sem_post(&resources.sync->master_starvation_guard);
+
+                    resources.state->finished = true;
+
+                    // Liberar lock de escritor
+                    sem_post(&resources.sync->state_mutex);
+
+                    // Notificar a la vista por última vez
+                    sem_post(&resources.sync->view_update_ready);
+                    sem_wait(&resources.sync->view_print_done);
+
+                    game_finished = true;
+                    break; // salir del for y luego del while por la condición
+                }
+
+                // Dar turno al siguiente jugador activo (si queda alguno)
+                int next_player = player_idx;
+                bool posted = false;
+                for (int step = 0; step < args.player_count; step++) {
+                    next_player = (next_player + 1) % args.player_count;
+                    if (!resources.state->players[next_player].blocked && resources.player_pipes[next_player] != -1) {
+                        sem_post(&resources.sync->player_can_move[next_player]);
+                        fprintf(stderr, "[master] cediendo turno a jugador=%d\n", next_player);
+                        posted = true;
+                        break;
+                    }
+                }
+                if (!posted) {
+                    fprintf(stderr, "[master] no se encontró jugador para ceder turno (esto no debería ocurrir si remaining_active>0)\n");
                 }
 
                 // Avanzar al siguiente jugador para la próxima ronda
@@ -491,7 +541,8 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("==== FIN DEL JUEGO ====\\n");
+    printf("==== FIN DEL JUEGO ====\n");
+    fprintf(stderr, "[master] fuera del bucle principal\n");
 
     // Esperar a que los hijos terminen y reportar estado
     for (int i = 0; i < args.player_count; i++) {
@@ -500,9 +551,9 @@ int main(int argc, char **argv)
             waitpid(resources.player_pids[i], &status, 0);
             printf("Jugador %d (PID %d) terminó con puntaje: %d. ", i, resources.player_pids[i], resources.state->players[i].score);
             if (WIFEXITED(status)) {
-                printf("Salida normal con código %d.\\n", WEXITSTATUS(status));
+                printf("Salida normal con código %d.\n", WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
-                printf("Terminó por señal %d.\\n", WTERMSIG(status));
+                printf("Terminó por señal %d.\n", WTERMSIG(status));
             }
         }
     }
@@ -514,9 +565,9 @@ int main(int argc, char **argv)
         waitpid(resources.view_pid, &status, 0);
         printf("Vista (PID %d) terminó. ", resources.view_pid);
         if (WIFEXITED(status)) {
-            printf("Salida normal con código %d.\\n", WEXITSTATUS(status));
+            printf("Salida normal con código %d.\n", WEXITSTATUS(status));
         } else if (WIFSIGNALED(status)) {
-            printf("Terminó por señal %d.\\n", WTERMSIG(status));
+            printf("Terminó por señal %d.\n", WTERMSIG(status));
         }
     }
 

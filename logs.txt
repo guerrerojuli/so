@@ -1,0 +1,418 @@
+player: PID 171 not registered in GameState: No such file or directory
+[master] entrando al bucle de juego
+[master] activos=4
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 2
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=4
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 2
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=2
+[master] activos=4
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=2 (fd=7)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=0
+[master] activos=3
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=0 (fd=5)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] cediendo turno a jugador=3
+[master] activos=2
+[master] llamando a select(max_fd=8, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=3 (fd=8)
+[master] cediendo turno a jugador=1
+[master] activos=1
+[master] llamando a select(max_fd=6, timeout=10 s)
+[master] select retornó 1
+[master] turno jugador=1 (fd=6)
+[master] remaining_active=0 tras jugada -> seteando finished y saliendo
+[master] fuera del bucle principal
