@@ -13,6 +13,7 @@
 #include <semaphore.h>
 #include <time.h>
 #include <sys/select.h>
+#include <math.h>
 
 #include "shmADT.h"
 #include "game_state.h"
@@ -26,8 +27,8 @@ typedef struct {
     unsigned int delay;
     unsigned int timeout;
     unsigned int seed;
-    char *view_path; // binario de la view
-    char **player_paths; // binarios de los jugadores
+    char *view_path;
+    char *player_paths[MAX_PLAYERS];
     int player_count;
 } MasterArgs;
 
@@ -126,17 +127,22 @@ static void init_game_state(const MasterArgs *args, GameResources *res) {
         p->invalid_move_requests = 0;
         p->blocked = false;
 
-        // Lógica de spawn simple: en las esquinas y puntos intermedios - REVISAR LUEGO
-        switch(i) {
-            case 0: p->x = 0; p->y = 0; break;
-            case 1: p->x = state->width - 1; p->y = state->height - 1; break;
-            case 2: p->x = 0; p->y = state->height - 1; break;
-            case 3: p->x = state->width - 1; p->y = 0; break;
-            default: // Posiciones aleatorias para más jugadores, evitando bordes
-                p->x = 1 + (rand() % (state->width - 2));
-                p->y = 1 + (rand() % (state->height - 2));
-                break;
-        }
+        // Cálculo delíptico alrededor del centro del tablero
+        double radius_x = ((double)state->width) / 2.75;
+        double radius_y = ((double)state->height) / 2.75;
+        if (radius_x < 1.0) radius_x = 1.0;
+        if (radius_y < 1.0) radius_y = 1.0;
+        int center_x = (int)state->width / 2;
+        int center_y = (int)state->height / 2;
+
+        double theta = (2.0 * M_PI * (double)i) / (double)state->player_count;
+        int tx = center_x + (int)lround(radius_x * cos(theta));
+        int ty = center_y + (int)lround(radius_y * sin(theta));
+        tx = clampi(tx, 0, (int)state->width - 1);
+        ty = clampi(ty, 0, (int)state->height - 1);
+
+        p->x = (unsigned short)tx;
+        p->y = (unsigned short)ty;
         // Marcar la celda de spawn como ocupada por el jugador, según el enunciado (-id).
         state->board[p->y * state->width + p->x] = -(i);
     }
@@ -243,12 +249,11 @@ static bool parse_args(int argc, char **argv, MasterArgs *args) {
     args->timeout = DEFAULT_TIMEOUT;
     args->seed = time(NULL);
     args->view_path = NULL;
-    args->player_paths = NULL;
     args->player_count = 0;
 
     int opt;
-    bool players_found = false;
-    while ((opt = getopt(argc, argv, "w:h:d:t:s:v:p:")) != -1 && !players_found) {
+    bool players_set = false; // Se usa para aceptar solo el primer -p
+    while ((opt = getopt(argc, argv, "w:h:d:t:s:v:p:")) != -1) {
         switch (opt) {
             case 'w':
                 args->width = atoi(optarg);
@@ -269,16 +274,33 @@ static bool parse_args(int argc, char **argv, MasterArgs *args) {
                 args->view_path = optarg;
                 break;
             case 'p':
-                // optind es el índice del siguiente argumento a procesar.
-                // A partir de aquí son todas rutas de players.
-                optind--;
-                args->player_count = argc - optind;
-                if (args->player_count > MAX_PLAYERS) {
-                    fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
-                    return false;
+                // Aceptamos solo el primer grupo de jugadores (primer -p).
+                // Consumimos optarg (primer jugador) y luego todos los argumentos
+                // siguientes que no comiencen con '-' como jugadores adicionales.
+                if (!players_set) {
+                    players_set = true;
+                    // Primer jugador proviene de optarg
+                    if (args->player_count == MAX_PLAYERS) {
+                        fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                        return false;
+                    }
+                    args->player_paths[args->player_count++] = optarg;
+
+                    // Agregar jugadores adicionales hasta el próximo argumento que parezca opción
+                    while (optind < argc && argv[optind][0] != '-') {
+                        if (args->player_count == MAX_PLAYERS) {
+                            fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                            return false;
+                        }
+                        args->player_paths[args->player_count++] = argv[optind++];
+                    }
+                } else {
+                    // Ignorar -p adicionales: no agregar jugadores y saltar sus argumentos
+                    // para que getopt pueda seguir procesando opciones posteriores.
+                    while (optind < argc && argv[optind][0] != '-') {
+                        optind++;
+                    }
                 }
-                args->player_paths = &argv[optind];
-                players_found = true; // Salimos del bucle después de esto
                 break;
             default:
                 print_usage(argv[0]);
