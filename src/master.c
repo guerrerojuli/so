@@ -20,6 +20,14 @@
 #include "game_sync.h"
 #include "constants.h"
 
+// Shared direction vectors and common constants
+#define NUM_DIRECTIONS 8
+#define COORD_BUF_LEN 16
+#define BOARD_INDEX(state, X, Y) ((Y) * (state)->width + (X))
+static const int DIR_DX[NUM_DIRECTIONS] = {0, 1, 1, 1, 0, -1, -1, -1};
+static const int DIR_DY[NUM_DIRECTIONS] = {-1, -1, 0, 1, 1, 1, 0, -1};
+static const double SPAWN_RADIUS_DIVISOR = 2.75;
+
 static inline int clampi(int v, int lo, int hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -63,6 +71,34 @@ static inline void notify_view(const MasterArgs *args, GameResources *res)
     struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
     nanosleep(&delay, NULL);
 }
+static inline void lock_writer(GameResources *res)
+{
+    sem_wait(&res->sync->master_starvation_guard);
+    sem_wait(&res->sync->state_mutex);
+    sem_post(&res->sync->master_starvation_guard);
+}
+
+static inline void unlock_writer(GameResources *res)
+{
+    sem_post(&res->sync->state_mutex);
+}
+
+static inline void finish_game_and_notify(const MasterArgs *args, GameResources *res)
+{
+    lock_writer(res);
+    res->state->finished = true;
+    unlock_writer(res);
+    notify_view(args, res);
+}
+
+static inline void set_cloexec(int fd)
+{
+    int flags = fcntl(fd, F_GETFD);
+    if (flags != -1)
+    {
+        fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+}
 
 static inline long long monotonic_millis(void)
 {
@@ -73,20 +109,18 @@ static inline long long monotonic_millis(void)
 
 static bool any_player_can_move(const GameState *state)
 {
-    static const int dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
-    static const int dy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
     for (unsigned int i = 0; i < state->player_count; i++)
     {
         const Player *p = &state->players[i];
         if (p->blocked)
             continue;
-        for (int m = 0; m < 8; m++)
+        for (int m = 0; m < NUM_DIRECTIONS; m++)
         {
-            int nx = (int)p->x + dx[m];
-            int ny = (int)p->y + dy[m];
+            int nx = (int)p->x + DIR_DX[m];
+            int ny = (int)p->y + DIR_DY[m];
             if (nx >= 0 && nx < (int)state->width && ny >= 0 && ny < (int)state->height)
             {
-                if (state->board[ny * state->width + nx] > 0)
+                if (state->board[BOARD_INDEX(state, nx, ny)] > 0)
                 {
                     return true;
                 }
@@ -108,11 +142,7 @@ static bool launch_player(const MasterArgs *args, GameResources *res, int player
     // Evitar heredar descriptores a procesos execv (CLOEXEC)
     for (int i = 0; i < 2; i++)
     {
-        int flags = fcntl(pipe_fds[i], F_GETFD);
-        if (flags != -1)
-        {
-            fcntl(pipe_fds[i], F_SETFD, flags | FD_CLOEXEC);
-        }
+        set_cloexec(pipe_fds[i]);
     }
 
     pid_t pid = fork();
@@ -166,8 +196,8 @@ static bool launch_view(const MasterArgs *args, GameResources *res, const char *
 
 static bool launch_children(const MasterArgs *args, GameResources *res)
 {
-    char width_str[16]; // para pasarle el ancho y alto al jugador y view
-    char height_str[16];
+    char width_str[COORD_BUF_LEN]; // para pasarle el ancho y alto al jugador y view
+    char height_str[COORD_BUF_LEN];
     snprintf(width_str, sizeof(width_str), "%u", args->width);
     snprintf(height_str, sizeof(height_str), "%u", args->height);
 
@@ -220,8 +250,8 @@ static void init_game_state(const MasterArgs *args, GameResources *res)
         p->blocked = false;
 
         // Cálculo delíptico alrededor del centro del tablero
-        double radius_x = ((double)state->width) / 2.75;
-        double radius_y = ((double)state->height) / 2.75;
+        double radius_x = ((double)state->width) / SPAWN_RADIUS_DIVISOR;
+        double radius_y = ((double)state->height) / SPAWN_RADIUS_DIVISOR;
         if (radius_x < 1.0)
             radius_x = 1.0;
         if (radius_y < 1.0)
@@ -238,7 +268,7 @@ static void init_game_state(const MasterArgs *args, GameResources *res)
         p->x = (unsigned short)tx;
         p->y = (unsigned short)ty;
         // Marcar la celda de spawn como ocupada por el jugador, según el enunciado (-id).
-        state->board[p->y * state->width + p->x] = -(i);
+        state->board[BOARD_INDEX(state, p->x, p->y)] = -(i);
     }
 }
 
@@ -276,25 +306,22 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
     bool is_valid = false;
 
     // Calcular nuevas coordenadas (lógica simple, se puede refinar)
-    int dx[] = {0, 1, 1, 1, 0, -1, -1, -1};
-    int dy[] = {-1, -1, 0, 1, 1, 1, 0, -1};
-
-    if (move < 8)
+    if (move < NUM_DIRECTIONS)
     {
-        int nx = player->x + dx[move];
-        int ny = player->y + dy[move];
+        int nx = player->x + DIR_DX[move];
+        int ny = player->y + DIR_DY[move];
 
         // Validar movimiento
         if (nx >= 0 && nx < state->width && ny >= 0 && ny < state->height &&
-            state->board[ny * state->width + nx] > 0)
+            state->board[BOARD_INDEX(state, nx, ny)] > 0)
         {
 
             is_valid = true;
-            int reward = state->board[ny * state->width + nx];
+            int reward = state->board[BOARD_INDEX(state, nx, ny)];
             player->score += reward;
             player->x = nx;
             player->y = ny;
-            state->board[ny * state->width + nx] = -(player_idx);
+            state->board[BOARD_INDEX(state, nx, ny)] = -(player_idx);
             player->valid_move_requests++;
         }
     }
@@ -305,7 +332,7 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
     }
 
     // Liberar bloqueo de escritor
-    sem_post(&res->sync->state_mutex);
+    unlock_writer(res);
 
     // Notificar al jugador correspondiente que su solicitud fue procesada
     sem_post(&res->sync->player_can_move[player_idx]);
@@ -623,12 +650,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
         if (remaining_ms <= 0)
         {
             // Set finished bajo lock y notificar vista
-            sem_wait(&resources->sync->master_starvation_guard);
-            sem_wait(&resources->sync->state_mutex);
-            sem_post(&resources->sync->master_starvation_guard);
-            resources->state->finished = true;
-            sem_post(&resources->sync->state_mutex);
-            notify_view(args, resources);
+            finish_game_and_notify(args, resources);
             break;
         }
 
@@ -647,12 +669,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
         if (ready_fds == 0)
         {
             // select agotó el timeout relativo a últimos válidos → finalizar
-            sem_wait(&resources->sync->master_starvation_guard);
-            sem_wait(&resources->sync->state_mutex);
-            sem_post(&resources->sync->master_starvation_guard);
-            resources->state->finished = true;
-            sem_post(&resources->sync->state_mutex);
-            notify_view(args, resources);
+            finish_game_and_notify(args, resources);
             break;
         }
 
@@ -687,18 +704,8 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
                 if (remaining_active == 0)
                 {
-                    // Adquirir lock de escritor para actualizar el estado final
-                    sem_wait(&resources->sync->master_starvation_guard);
-                    sem_wait(&resources->sync->state_mutex);
-                    sem_post(&resources->sync->master_starvation_guard);
-
-                    resources->state->finished = true;
-
-                    // Liberar lock de escritor
-                    sem_post(&resources->sync->state_mutex);
-
-                    // Notificar a la vista por última vez
-                    notify_view(args, resources);
+                    // Adquirir lock de escritor para actualizar el estado final y notificar
+                    finish_game_and_notify(args, resources);
 
                     break; // salir del for y luego del while por la condición
                 }
@@ -706,25 +713,10 @@ static void init_game(const MasterArgs *args, GameResources *resources)
                 // Finalizar si ningún jugador puede moverse
                 if (!any_player_can_move(resources->state))
                 {
-                    sem_wait(&resources->sync->master_starvation_guard);
-                    sem_wait(&resources->sync->state_mutex);
-                    sem_post(&resources->sync->master_starvation_guard);
-                    resources->state->finished = true;
-                    sem_post(&resources->sync->state_mutex);
-                    notify_view(args, resources);
+                    finish_game_and_notify(args, resources);
                     break;
                 }
 
-                // Dar turno al siguiente jugador activo (si queda alguno)
-                int next_player = player_idx;
-                for (int step = 0; step < args->player_count; step++)
-                {
-                    next_player = (next_player + 1) % args->player_count;
-                    if (!resources->state->players[next_player].blocked && resources->player_pipes[next_player] != -1)
-                    {
-                        break;
-                    }
-                }
                 // Avanzar al siguiente jugador para la próxima ronda
                 current_player_turn = (player_idx + 1) % args->player_count;
                 break; // Procesar solo un jugador por iteración de select
