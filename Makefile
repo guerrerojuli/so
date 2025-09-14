@@ -4,8 +4,7 @@ CC ?= cc
 CSTD ?= -std=c11
 WARN ?= -Wall -Wextra -Wpedantic
 OPT  ?= -O2
-DBG  ?= -g
-CFLAGS ?= $(CSTD) $(WARN) $(OPT) $(DBG) -Iinclude -D_DEFAULT_SOURCE
+CFLAGS ?= $(CSTD) $(WARN) $(OPT) -Iinclude -D_DEFAULT_SOURCE
 
 LIBS_COMMON := -lm
 LIBS_VIEW   := -lncurses
@@ -20,7 +19,7 @@ endif
 BINS := master view player
 OBJS_COMMON := src/utils/game_sync.o src/utils/shmADT.o src/utils/game_logic.o
 
-.PHONY: all clean format vg-master vg-view vg-player vg-game
+.PHONY: all clean format
 
 all: $(BINS)
 
@@ -44,40 +43,3 @@ clean:
 
 format:
 	@command -v clang-format >/dev/null 2>&1 && clang-format -i src/*.c src/headers/*.h || echo "clang-format no encontrado; omitiendo formato"
-
-# =========================
-# Valgrind configuration
-# =========================
-
-# Allow overriding from the CLI: make vg-master VG_FLAGS="..."
-VG ?= valgrind
-VG_FLAGS ?= --leak-check=full --show-leak-kinds=all --track-origins=yes \
-            --trace-children=yes --track-fds=yes --num-callers=25 \
-            --errors-for-leak-kinds=definite,possible --error-exitcode=123 \
-            --log-file=valgrind-%p.log
-
-# Default scenario parameters (override with W=, H=, N=, DELAY=, TIMEOUT=, SEED=)
-W ?= 10
-H ?= 8
-N ?= 2
-DELAY ?= 0
-TIMEOUT ?= 2
-SEED ?= 1
-
-# Expand to N copies of ./player
-PLAYERS := $(foreach i,$(shell seq 1 $(N)),./player)
-
-# Run master under Valgrind with a small demo setup
-vg-master: all
-	$(VG) $(VG_FLAGS) ./master -w $(W) -h $(H) -d $(DELAY) -t $(TIMEOUT) -s $(SEED) -v ./view -p $(PLAYERS)
-
-# Run view alone under Valgrind
-vg-view: view
-	$(VG) $(VG_FLAGS) ./view $(W) $(H)
-
-# Run one player under Valgrind
-vg-player: player
-	$(VG) $(VG_FLAGS) ./player $(W) $(H)
-
-# Alias: run the whole game via master
-vg-game: vg-master
