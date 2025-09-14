@@ -134,6 +134,10 @@ static void run_player_loop(GameState *state, GameSync *sync)
     return;
   }
 
+  // Direcciones relativas para 8 vecinos
+  static const int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+  static const int DY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
   while (true)
   {
     if (sem_wait(&sync->player_can_move[me]) == -1)
@@ -144,15 +148,50 @@ static void run_player_loop(GameState *state, GameSync *sync)
       break;
     }
 
-    int chosen_dir = -1;
+    // Snapshot mínimo bajo lock de lectura
+    unsigned short width_snapshot = 0, height_snapshot = 0;
+    unsigned short x_snapshot = 0, y_snapshot = 0;
+    int neighbor_vals[8];
+    unsigned char neighbor_ok_mask = 0;
+
     game_sync_reader_enter(sync);
     finished_now = state->finished;
     if (!finished_now)
-      chosen_dir = choose_direction(state, me);
+    {
+      width_snapshot = state->width;
+      height_snapshot = state->height;
+      x_snapshot = state->players[me].x;
+      y_snapshot = state->players[me].y;
+      for (int d = 0; d < 8; d++)
+      {
+        int nx = (int)x_snapshot + DX[d];
+        int ny = (int)y_snapshot + DY[d];
+        if (nx >= 0 && ny >= 0 && nx < (int)width_snapshot && ny < (int)height_snapshot)
+        {
+          neighbor_ok_mask |= (1u << d);
+          neighbor_vals[d] = state->board[ny * (int)width_snapshot + nx];
+        }
+      }
+    }
     game_sync_reader_exit(sync);
 
     if (finished_now)
       break;
+
+    // Calcular la mejor dirección fuera del lock
+    int chosen_dir = -1;
+    int bestv = -1;
+    for (int d = 0; d < 8; d++)
+    {
+      if (((neighbor_ok_mask >> d) & 1u) == 0)
+        continue;
+      int v = neighbor_vals[d];
+      if (v >= 1 && v <= 9 && v > bestv)
+      {
+        bestv = v;
+        chosen_dir = d;
+      }
+    }
 
     if (chosen_dir < 0)
     {
@@ -166,6 +205,7 @@ static void run_player_loop(GameState *state, GameSync *sync)
     {
       if (errno != 0)
         fprintf(stderr, "player: failed to write direction to stdout (pid=%d): %s\n", (int)mypid, strerror(errno));
+      close(STDOUT_FILENO);
       break;
     }
   }
