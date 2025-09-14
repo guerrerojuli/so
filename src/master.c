@@ -28,6 +28,14 @@ static const int DIR_DX[NUM_DIRECTIONS] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DIR_DY[NUM_DIRECTIONS] = {-1, -1, 0, 1, 1, 1, 0, -1};
 static const double SPAWN_RADIUS_DIVISOR = 3;
 
+static volatile sig_atomic_t stop_requested = 0;
+
+static void handle_sigint_master(int sig)
+{
+    (void)sig;
+    stop_requested = 1;
+}
+
 static inline int clampi(int v, int lo, int hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -67,9 +75,16 @@ static inline void notify_view(const MasterArgs *args, GameResources *res)
         return;
     }
     sem_post(&res->sync->view_update_ready);
+    if (stop_requested)
+    {
+        return;
+    }
     sem_wait(&res->sync->view_print_done);
-    struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
-    nanosleep(&delay, NULL);
+    if (!stop_requested)
+    {
+        struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
+        nanosleep(&delay, NULL);
+    }
 }
 
 static inline void lock_writer(GameResources *res)
@@ -90,6 +105,31 @@ static inline void finish_game_and_notify(const MasterArgs *args, GameResources 
     res->state->finished = true;
     unlock_writer(res);
     notify_view(args, res);
+}
+
+static void request_graceful_shutdown(const MasterArgs *args, GameResources *res)
+{
+    // Marcar juego terminado y notificar a la vista (si existe)
+    finish_game_and_notify(args, res);
+
+    // Despertar a todos los jugadores para que salgan del semáforo si están esperando
+    for (int i = 0; i < args->player_count; i++)
+    {
+        sem_post(&res->sync->player_can_move[i]);
+    }
+
+    // Cerrar pipes para desbloquear posibles escrituras/bloqueos
+    if (res->player_pipes)
+    {
+        for (int i = 0; i < args->player_count; i++)
+        {
+            if (res->player_pipes[i] >= 0)
+            {
+                close(res->player_pipes[i]);
+                res->player_pipes[i] = -1;
+            }
+        }
+    }
 }
 
 static inline void set_cloexec(int fd)
@@ -610,6 +650,11 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
     while (!resources->state->finished)
     {
+        if (stop_requested)
+        {
+            request_graceful_shutdown(args, resources);
+            break;
+        }
         FD_ZERO(&read_fds);
         max_fd = 0; // Recalcular en cada iteración
         int active_players = 0;
@@ -664,7 +709,14 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
         if (ready_fds == -1)
         {
-            perror("select failed");
+            if (errno == EINTR || stop_requested)
+            {
+                request_graceful_shutdown(args, resources);
+            }
+            else
+            {
+                perror("select failed");
+            }
             break;
         }
 
@@ -748,6 +800,11 @@ int main(int argc, char **argv)
     MasterArgs args;
     if (!parse_args(argc, argv, &args))
         return EXIT_FAILURE;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_sigint_master;
+    sigaction(SIGINT, &sa, NULL);
 
     print_config(&args);
 
