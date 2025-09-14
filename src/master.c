@@ -45,10 +45,59 @@ typedef struct
     GameState *state;
     ShmADT sync_shm;
     GameSync *sync;
-    pid_t *player_pids; // PIDs de los jugadores
-    pid_t view_pid;     // PID de la view
-    int *player_pipes;  // Array de file descriptors para los extremos de lectura
+    pid_t *player_pids;   // PIDs de los jugadores
+    pid_t view_pid;       // PID de la view
+    int *player_pipes;    // Array de file descriptors para los extremos de lectura
+    int *player_statuses; // Exit statuses de jugadores (para impresión posterior)
+    int view_status;      // Exit status de la vista
 } GameResources;
+
+// Helper: notificar a la vista (si existe) y respetar el delay configurado
+static inline void notify_view_if_present(const MasterArgs *args, GameResources *res)
+{
+    if (!args->view_path)
+    {
+        return;
+    }
+    sem_post(&res->sync->view_update_ready);
+    sem_wait(&res->sync->view_print_done);
+    struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
+    nanosleep(&delay, NULL);
+}
+
+// Helper: reloj monotónico en milisegundos
+static inline long long monotonic_millis(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL + (long long)(ts.tv_nsec / 1000000LL);
+}
+
+// Helper: ¿algún jugador puede moverse?
+static bool any_player_can_move(const GameState *state)
+{
+    static const int dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    static const int dy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    for (unsigned int i = 0; i < state->player_count; i++)
+    {
+        const Player *p = &state->players[i];
+        if (p->blocked)
+            continue;
+        for (int m = 0; m < 8; m++)
+        {
+            int nx = (int)p->x + dx[m];
+            int ny = (int)p->y + dy[m];
+            if (nx >= 0 && nx < (int)state->width && ny >= 0 && ny < (int)state->height)
+            {
+                if (state->board[ny * state->width + nx] > 0)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
 static bool launch_player(const MasterArgs *args, GameResources *res, int player_index, const char *width_str, const char *height_str)
 {
@@ -214,9 +263,8 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
         close(pipe_fd);
         res->player_pipes[player_idx] = -1; // Marcar como cerrado
 
-        // Notificar a la vista del cambio de estado (jugador bloqueado) para romper el deadlock
-        sem_post(&res->sync->view_update_ready);
-        sem_wait(&res->sync->view_print_done);
+        // Notificar a la vista del cambio de estado (jugador bloqueado) si existe
+        notify_view_if_present(args, res);
 
         return;
     }
@@ -262,16 +310,11 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
     // Liberar bloqueo de escritor
     sem_post(&res->sync->state_mutex);
 
-    // Notificar a la vista si hubo un movimiento válido
-    if (is_valid && args->view_path)
-    {
-        sem_post(&res->sync->view_update_ready);
-        // TODO: Usar sem_timedwait para no bloquearse indefinidamente
-        sem_wait(&res->sync->view_print_done);
+    // Notificar al jugador correspondiente que su solicitud fue procesada
+    sem_post(&res->sync->player_can_move[player_idx]);
 
-        struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
-        nanosleep(&delay, NULL);
-    }
+    // Notificar a la vista ante cualquier cambio de estado (válido o inválido)
+    notify_view_if_present(args, res);
 }
 
 static void cleanup_game_resources(GameResources *res, int player_count)
@@ -306,6 +349,10 @@ static void cleanup_game_resources(GameResources *res, int player_count)
     {
         free(res->player_pids);
     }
+    if (res->player_statuses)
+    {
+        free(res->player_statuses);
+    }
     if (res->state_shm)
     {
         destroy_shm(res->state_shm);
@@ -320,14 +367,28 @@ static void print_finish_status(const MasterArgs *args, GameResources *res)
 {
     if (res->view_pid > 0)
     {
-        printf("View exited (0)\n");
+        if (WIFEXITED(res->view_status))
+        {
+            printf("View exited (%d)\n", WEXITSTATUS(res->view_status));
+        }
+        else if (WIFSIGNALED(res->view_status))
+        {
+            printf("View terminated by signal %d\n", WTERMSIG(res->view_status));
+        }
     }
 
     for (int i = 0; i < args->player_count; i++)
     {
         if (res->player_pids[i] > 0)
         {
-            printf("Player %d (PID %d) exited (0) with a score of %d / %d / %d.\n", i, res->player_pids[i], res->state->players[i].score, res->state->players[i].valid_move_requests, res->state->players[i].invalid_move_requests);
+            if (WIFEXITED(res->player_statuses[i]))
+            {
+                printf("Player %d (PID %d) exited (%d) with a score of %d / %d / %d.\n", i, res->player_pids[i], WEXITSTATUS(res->player_statuses[i]), res->state->players[i].score, res->state->players[i].valid_move_requests, res->state->players[i].invalid_move_requests);
+            }
+            else if (WIFSIGNALED(res->player_statuses[i]))
+            {
+                printf("Player %d (PID %d) terminated by signal %d with a score of %d / %d / %d.\n", i, res->player_pids[i], WTERMSIG(res->player_statuses[i]), res->state->players[i].score, res->state->players[i].valid_move_requests, res->state->players[i].invalid_move_requests);
+            }
         }
     }
 }
@@ -450,7 +511,7 @@ static bool init_game_resources(const MasterArgs *args, GameResources *res)
     res->sync->readers_count = 0;
     for (int i = 0; i < args->player_count; i++)
     {
-        sem_init(&res->sync->player_can_move[i], 1, (i == 0) ? 1 : 0); // El primer jugador puede empezar
+        sem_init(&res->sync->player_can_move[i], 1, 1); // Cada jugador puede enviar 1 solicitud inicial
     }
 
     // Crear memoria compartida para el estado del juego
@@ -473,6 +534,7 @@ static bool init_resources(const MasterArgs *args, GameResources *res)
 
     res->player_pipes = (int *)calloc(args->player_count, sizeof(int));
     res->player_pids = (pid_t *)calloc(args->player_count, sizeof(pid_t));
+    res->player_statuses = (int *)calloc(args->player_count, sizeof(int));
     if (!res->player_pipes || !res->player_pids)
     {
         perror("Error al reservar memoria para recursos de hijos");
@@ -518,6 +580,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
     int current_player_turn = 0;
     fd_set read_fds;
     int max_fd = 0;
+    long long last_valid_move_ms = monotonic_millis();
 
     while (!resources->state->finished)
     {
@@ -556,9 +619,25 @@ static void init_game(const MasterArgs *args, GameResources *resources)
             break;
         }
 
+        // Timeout basado en último movimiento válido
+        long long now_ms = monotonic_millis();
+        long long elapsed_ms = now_ms - last_valid_move_ms;
+        long long remaining_ms = (long long)args->timeout * 1000LL - elapsed_ms;
+        if (remaining_ms <= 0)
+        {
+            // Set finished bajo lock y notificar vista
+            sem_wait(&resources->sync->master_starvation_guard);
+            sem_wait(&resources->sync->state_mutex);
+            sem_post(&resources->sync->master_starvation_guard);
+            resources->state->finished = true;
+            sem_post(&resources->sync->state_mutex);
+            notify_view_if_present(args, resources);
+            break;
+        }
+
         struct timeval timeout;
-        timeout.tv_sec = args->timeout;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = (time_t)(remaining_ms / 1000LL);
+        timeout.tv_usec = (suseconds_t)((remaining_ms % 1000LL) * 1000LL);
 
         int ready_fds = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
 
@@ -570,6 +649,13 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
         if (ready_fds == 0)
         {
+            // select agotó el timeout relativo a últimos válidos → finalizar
+            sem_wait(&resources->sync->master_starvation_guard);
+            sem_wait(&resources->sync->state_mutex);
+            sem_post(&resources->sync->master_starvation_guard);
+            resources->state->finished = true;
+            sem_post(&resources->sync->state_mutex);
+            notify_view_if_present(args, resources);
             break;
         }
 
@@ -581,7 +667,16 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
             if (FD_ISSET(player_pipe, &read_fds))
             {
+                // Procesar movimiento
+                // Capturar conteos previos para detectar si fue válido
+                unsigned int prev_valid = resources->state->players[player_idx].valid_move_requests;
                 process_player_move(player_idx, player_pipe, args, resources);
+
+                // Si hubo un movimiento válido, actualizar reloj
+                if (resources->state->players[player_idx].valid_move_requests > prev_valid)
+                {
+                    last_valid_move_ms = monotonic_millis();
+                }
 
                 // Recalcular jugadores activos después de procesar el movimiento
                 int remaining_active = 0;
@@ -606,10 +701,21 @@ static void init_game(const MasterArgs *args, GameResources *resources)
                     sem_post(&resources->sync->state_mutex);
 
                     // Notificar a la vista por última vez
-                    sem_post(&resources->sync->view_update_ready);
-                    sem_wait(&resources->sync->view_print_done);
+                    notify_view_if_present(args, resources);
 
                     break; // salir del for y luego del while por la condición
+                }
+
+                // Finalizar si ningún jugador puede moverse
+                if (!any_player_can_move(resources->state))
+                {
+                    sem_wait(&resources->sync->master_starvation_guard);
+                    sem_wait(&resources->sync->state_mutex);
+                    sem_post(&resources->sync->master_starvation_guard);
+                    resources->state->finished = true;
+                    sem_post(&resources->sync->state_mutex);
+                    notify_view_if_present(args, resources);
+                    break;
                 }
 
                 // Dar turno al siguiente jugador activo (si queda alguno)
@@ -619,7 +725,6 @@ static void init_game(const MasterArgs *args, GameResources *resources)
                     next_player = (next_player + 1) % args->player_count;
                     if (!resources->state->players[next_player].blocked && resources->player_pipes[next_player] != -1)
                     {
-                        sem_post(&resources->sync->player_can_move[next_player]);
                         break;
                     }
                 }
@@ -634,6 +739,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
     {
         int status;
         waitpid(resources->view_pid, &status, 0);
+        resources->view_status = status;
     }
     for (int i = 0; i < args->player_count; i++)
     {
@@ -641,6 +747,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
         {
             int status;
             waitpid(resources->player_pids[i], &status, 0);
+            resources->player_statuses[i] = status;
         }
     }
 }
