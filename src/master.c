@@ -59,6 +59,16 @@ static bool launch_player(const MasterArgs *args, GameResources *res, int player
         return false;
     }
 
+    // Evitar heredar descriptores a procesos execv (CLOEXEC)
+    for (int i = 0; i < 2; i++)
+    {
+        int flags = fcntl(pipe_fds[i], F_GETFD);
+        if (flags != -1)
+        {
+            fcntl(pipe_fds[i], F_SETFD, flags | FD_CLOEXEC);
+        }
+    }
+
     pid_t pid = fork();
     if (pid == -1)
     {
@@ -266,13 +276,28 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
 
 static void cleanup_game_resources(GameResources *res, int player_count)
 {
+    // Destruir semáforos antes de liberar la SHM de sincronización
+    if (res->sync)
+    {
+        sem_destroy(&res->sync->view_update_ready);
+        sem_destroy(&res->sync->view_print_done);
+        sem_destroy(&res->sync->master_starvation_guard);
+        sem_destroy(&res->sync->state_mutex);
+        sem_destroy(&res->sync->readers_count_mutex);
+        for (int i = 0; i < player_count && i < MAX_PLAYERS; i++)
+        {
+            sem_destroy(&res->sync->player_can_move[i]);
+        }
+    }
+
     if (res->player_pipes)
     {
         for (int i = 0; i < player_count; i++)
         {
-            if (res->player_pipes[i] != 0)
+            if (res->player_pipes[i] >= 0)
             {
                 close(res->player_pipes[i]);
+                res->player_pipes[i] = -1;
             }
         }
         free(res->player_pipes);
@@ -453,6 +478,12 @@ static bool init_resources(const MasterArgs *args, GameResources *res)
         perror("Error al reservar memoria para recursos de hijos");
         cleanup_game_resources(res, args->player_count);
         return false;
+    }
+
+    // Inicializar descriptores de pipe a -1 para evitar cierres accidentales de 0
+    for (int i = 0; i < args->player_count; i++)
+    {
+        res->player_pipes[i] = -1;
     }
 
     if (!init_game_resources(args, res))
