@@ -52,8 +52,7 @@ typedef struct
     int view_status;      // Exit status de la vista
 } GameResources;
 
-// Helper: notificar a la vista (si existe) y respetar el delay configurado
-static inline void notify_view_if_present(const MasterArgs *args, GameResources *res)
+static inline void notify_view(const MasterArgs *args, GameResources *res)
 {
     if (!args->view_path)
     {
@@ -65,7 +64,6 @@ static inline void notify_view_if_present(const MasterArgs *args, GameResources 
     nanosleep(&delay, NULL);
 }
 
-// Helper: reloj monotónico en milisegundos
 static inline long long monotonic_millis(void)
 {
     struct timespec ts;
@@ -73,7 +71,6 @@ static inline long long monotonic_millis(void)
     return (long long)ts.tv_sec * 1000LL + (long long)(ts.tv_nsec / 1000000LL);
 }
 
-// Helper: ¿algún jugador puede moverse?
 static bool any_player_can_move(const GameState *state)
 {
     static const int dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
@@ -104,7 +101,7 @@ static bool launch_player(const MasterArgs *args, GameResources *res, int player
     int pipe_fds[2];
     if (pipe(pipe_fds) == -1)
     {
-        perror("Error al crear pipe");
+        perror("pipe creation failed");
         return false;
     }
 
@@ -121,7 +118,7 @@ static bool launch_player(const MasterArgs *args, GameResources *res, int player
     pid_t pid = fork();
     if (pid == -1)
     {
-        perror("Error en fork para jugador");
+        perror("fork failed for player");
         return false;
     }
 
@@ -130,14 +127,14 @@ static bool launch_player(const MasterArgs *args, GameResources *res, int player
         close(pipe_fds[R_END]); // El jugador no lee del pipe - R_END = 0
         if (dup2(pipe_fds[W_END], STDOUT_FILENO) == -1)
         {
-            perror("Error en dup2 para jugador");
+            perror("dup2 failed for player");
             exit(EXIT_FAILURE);
         }
         close(pipe_fds[W_END]); // no necesito mas el original
 
         char *argv[] = {args->player_paths[player_index], (char *)width_str, (char *)height_str, NULL};
         execv(args->player_paths[player_index], argv);
-        fprintf(stderr, "Error al ejecutar %s: %s\n", args->player_paths[player_index], strerror(errno));
+        perror("execv player failed");
         exit(EXIT_FAILURE);
     }
 
@@ -153,14 +150,14 @@ static bool launch_view(const MasterArgs *args, GameResources *res, const char *
     pid_t pid = fork();
     if (pid == -1)
     {
-        perror("Error en fork para vista");
+        perror("fork failed for view");
         return false; // Aquí deberíamos limpiar los jugadores ya creados
     }
     if (pid == 0)
     { // Proceso hijo (vista)
         char *argv[] = {args->view_path, (char *)width_str, (char *)height_str, NULL};
         execv(args->view_path, argv);
-        fprintf(stderr, "Error al ejecutar %s: %s\n", args->view_path, strerror(errno));
+        perror("execv view failed");
         exit(EXIT_FAILURE);
     }
     res->view_pid = pid;
@@ -253,7 +250,7 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
     if (bytes_read <= 0)
     { // EOF o error
         if (bytes_read != 0)
-            perror("Error al leer del pipe");
+            perror("read from pipe failed");
 
         // Bloqueamos al jugador para que no se le considere más
         sem_wait(&res->sync->state_mutex);
@@ -264,7 +261,7 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
         res->player_pipes[player_idx] = -1; // Marcar como cerrado
 
         // Notificar a la vista del cambio de estado (jugador bloqueado) si existe
-        notify_view_if_present(args, res);
+        notify_view(args, res);
 
         return;
     }
@@ -314,7 +311,7 @@ static void process_player_move(int player_idx, int pipe_fd, const MasterArgs *a
     sem_post(&res->sync->player_can_move[player_idx]);
 
     // Notificar a la vista ante cualquier cambio de estado (válido o inválido)
-    notify_view_if_present(args, res);
+    notify_view(args, res);
 }
 
 static void cleanup_game_resources(GameResources *res, int player_count)
@@ -395,7 +392,7 @@ static void print_finish_status(const MasterArgs *args, GameResources *res)
 
 static void print_usage(const char *exec_name)
 {
-    fprintf(stderr, "Uso: %s [-w width] [-h height] [-d delay] [-t timeout] [-s seed] [-v view_path] -p player1 [player2 ...]\\n", exec_name);
+    fprintf(stderr, "Usage: %s [-w width] [-h height] [-d delay] [-t timeout] [-s seed] [-v view_path] -p player1 [player2 ...]\\n", exec_name);
 }
 
 static bool parse_args(int argc, char **argv, MasterArgs *args)
@@ -443,7 +440,7 @@ static bool parse_args(int argc, char **argv, MasterArgs *args)
                 // Primer jugador proviene de optarg
                 if (args->player_count == MAX_PLAYERS)
                 {
-                    fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                    fprintf(stderr, "Error: Maximum number of players is %d.\\n", MAX_PLAYERS);
                     return false;
                 }
                 args->player_paths[args->player_count++] = optarg;
@@ -453,7 +450,7 @@ static bool parse_args(int argc, char **argv, MasterArgs *args)
                 {
                     if (args->player_count == MAX_PLAYERS)
                     {
-                        fprintf(stderr, "Error: Se pueden tener como máximo %d jugadores.\\n", MAX_PLAYERS);
+                        fprintf(stderr, "Error: Maximum number of players is %d.\\n", MAX_PLAYERS);
                         return false;
                     }
                     args->player_paths[args->player_count++] = argv[optind++];
@@ -477,14 +474,14 @@ static bool parse_args(int argc, char **argv, MasterArgs *args)
 
     if (args->player_count == 0)
     {
-        fprintf(stderr, "Error: Se debe especificar al menos un jugador con -p.\\n");
+        fprintf(stderr, "Error: At least one player must be specified with -p.\\n");
         print_usage(argv[0]);
         return false;
     }
 
     if (args->width < MIN_WIDTH || args->height < MIN_HEIGHT)
     {
-        fprintf(stderr, "Error: El ancho y alto mínimos son %d y %d.\\n", MIN_WIDTH, MIN_HEIGHT);
+        fprintf(stderr, "Error: Minimum width and height are %d and %d.\\n", MIN_WIDTH, MIN_HEIGHT);
         return false;
     }
 
@@ -497,7 +494,7 @@ static bool init_game_resources(const MasterArgs *args, GameResources *res)
     res->sync_shm = create_shm(GAME_SYNC_SHM_NAME, sizeof(GameSync), O_RDWR | O_CREAT | O_EXCL, 0666, PROT_READ | PROT_WRITE);
     if (res->sync_shm == NULL)
     {
-        perror("Error al crear la SHM de sincronización");
+        perror("create_shm GameSync failed");
         return false;
     }
     res->sync = get_shm_pointer(res->sync_shm);
@@ -519,7 +516,7 @@ static bool init_game_resources(const MasterArgs *args, GameResources *res)
     res->state_shm = create_shm(GAME_STATE_SHM_NAME, state_size, O_RDWR | O_CREAT | O_EXCL, 0666, PROT_READ | PROT_WRITE);
     if (res->state_shm == NULL)
     {
-        perror("Error al crear la SHM del estado del juego");
+        perror("create_shm GameState failed");
         destroy_shm(res->sync_shm); // Limpiar recurso anterior
         return false;
     }
@@ -537,7 +534,7 @@ static bool init_resources(const MasterArgs *args, GameResources *res)
     res->player_statuses = (int *)calloc(args->player_count, sizeof(int));
     if (!res->player_pipes || !res->player_pids)
     {
-        perror("Error al reservar memoria para recursos de hijos");
+        perror("allocating memory for child resources failed");
         cleanup_game_resources(res, args->player_count);
         return false;
     }
@@ -550,7 +547,7 @@ static bool init_resources(const MasterArgs *args, GameResources *res)
 
     if (!init_game_resources(args, res))
     {
-        fprintf(stderr, "Error: No se pudieron inicializar los recursos del juego.\n");
+        fprintf(stderr, "Error: Game resources could not be initialized.\n");
         cleanup_game_resources(res, args->player_count);
         return false;
     }
@@ -631,7 +628,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
             sem_post(&resources->sync->master_starvation_guard);
             resources->state->finished = true;
             sem_post(&resources->sync->state_mutex);
-            notify_view_if_present(args, resources);
+            notify_view(args, resources);
             break;
         }
 
@@ -643,7 +640,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
 
         if (ready_fds == -1)
         {
-            perror("Error en select");
+            perror("select failed");
             break;
         }
 
@@ -655,7 +652,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
             sem_post(&resources->sync->master_starvation_guard);
             resources->state->finished = true;
             sem_post(&resources->sync->state_mutex);
-            notify_view_if_present(args, resources);
+            notify_view(args, resources);
             break;
         }
 
@@ -701,7 +698,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
                     sem_post(&resources->sync->state_mutex);
 
                     // Notificar a la vista por última vez
-                    notify_view_if_present(args, resources);
+                    notify_view(args, resources);
 
                     break; // salir del for y luego del while por la condición
                 }
@@ -714,7 +711,7 @@ static void init_game(const MasterArgs *args, GameResources *resources)
                     sem_post(&resources->sync->master_starvation_guard);
                     resources->state->finished = true;
                     sem_post(&resources->sync->state_mutex);
-                    notify_view_if_present(args, resources);
+                    notify_view(args, resources);
                     break;
                 }
 
@@ -768,7 +765,7 @@ int main(int argc, char **argv)
 
     if (!launch_children(&args, &resources))
     {
-        fprintf(stderr, "Error: No se pudieron lanzar los procesos hijos.\n");
+        fprintf(stderr, "Error: Child processes could not be launched.\n");
         cleanup_game_resources(&resources, args.player_count);
         return EXIT_FAILURE;
     }
