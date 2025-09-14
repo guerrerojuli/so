@@ -26,7 +26,7 @@
 #define BOARD_INDEX(state, X, Y) ((Y) * (state)->width + (X))
 static const int DIR_DX[NUM_DIRECTIONS] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DIR_DY[NUM_DIRECTIONS] = {-1, -1, 0, 1, 1, 1, 0, -1};
-static const double SPAWN_RADIUS_DIVISOR = 2.75;
+static const double SPAWN_RADIUS_DIVISOR = 3;
 
 static inline int clampi(int v, int lo, int hi)
 {
@@ -71,6 +71,7 @@ static inline void notify_view(const MasterArgs *args, GameResources *res)
     struct timespec delay = {.tv_sec = args->delay / 1000, .tv_nsec = (args->delay % 1000) * 1000000L};
     nanosleep(&delay, NULL);
 }
+
 static inline void lock_writer(GameResources *res)
 {
     sem_wait(&res->sync->master_starvation_guard);
@@ -238,12 +239,12 @@ static void init_game_state(const MasterArgs *args, GameResources *res)
         state->board[i] = 1 + (rand() % 9); // Recompensas entre 1 y 9
     }
 
-    // Inicializar jugadores
+    // state->board[BOARD_INDEX(state, args->width - 1, (args->height / 2))] = 4;
+    //  Inicializar jugadores
     for (int i = 0; i < args->player_count; i++)
     {
         Player *p = &state->players[i];
         p->pid = res->player_pids[i];
-        snprintf(p->name, sizeof(p->name), "player %d", i);
         p->score = 0;
         p->valid_move_requests = 0;
         p->invalid_move_requests = 0;
@@ -600,6 +601,7 @@ static void print_config(const MasterArgs *args)
 static void init_game(const MasterArgs *args, GameResources *resources)
 {
     init_game_state(args, resources);
+    notify_view(args, resources);
 
     int current_player_turn = 0;
     fd_set read_fds;
