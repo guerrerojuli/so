@@ -17,8 +17,7 @@ else ifeq ($(UNAME_S),Darwin)
 endif
 
 BINS := master view player
-OBJS_COMMON := src/utils/game_sync.o src/utils/shmADT.o src/utils/game_logic.o
-
+OBJS_COMMON := src/utils/game_sync.o src/utils/shmADT.o 
 .PHONY: all clean format
 
 all: $(BINS)

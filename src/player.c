@@ -10,8 +10,6 @@
 #include "game_state.h"
 #include "game_sync.h"
 #include "shmADT.h"
-#include "player.h"
-#include "game_logic.h"
 
 static bool find_player_index_by_pid(const GameState *state, GameSync *sync,
                                      pid_t pid, unsigned *out_index,

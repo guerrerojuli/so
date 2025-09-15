@@ -14,7 +14,6 @@
 #include "game_state.h"
 #include "game_sync.h"
 #include "shmADT.h"
-#include "view.h"
 
 static volatile sig_atomic_t stop_requested = 0;
 static int colors_ok = 0;
